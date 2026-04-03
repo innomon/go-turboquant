@@ -14,24 +14,24 @@ This plan outlines the implementation steps to incorporate Gemma 4 (E2B/E4B) sup
 ## 📅 Roadmap
 
 ### 🧱 Phase 1: Shared KV Cache & RoPE (1-2 Days)
-- [ ] Modify `KVCache` to support a `Shared` mode.
-- [ ] Implement `ProportionalRoPE` for Global Attention layers.
-- [ ] **Validation:** Test `KVCache` update/read logic with multiple simulated layers.
+- [x] Modify `KVCache` to support a `Shared` mode.
+- [x] Implement `ProportionalRoPE` for Global Attention layers.
+- [x] **Validation:** Test `KVCache` update/read logic with multiple simulated layers.
 
 ### 🏗️ Phase 2: Gemma 4 Block & PLE (2-3 Days)
-- [ ] Create `TurboGemma4Block` in `turboquant/block4.go`.
-- [ ] Add `PLE` projection and residual addition.
-- [ ] **Validation:** Compare `TurboGemma4Block` output against a reference Gemma 4 block (if available, or simulate expected behavior).
+- [x] Create `TurboGemma4Block` in `turboquant/block4.go`.
+- [x] Add `PLE` projection and residual addition.
+- [x] **Validation:** Compare `TurboGemma4Block` output against a reference Gemma 4 block (if available, or simulate expected behavior).
 
 ### 🌀 Phase 3: Hybrid Attention & SWA (3-4 Days)
-- [ ] Implement `SlidingWindowAttention` logic in `turboquant/attention.go`.
-- [ ] Add logic to switch between SWA and Global attention based on layer index.
-- [ ] **Validation:** Verify context retrieval accuracy for both SWA and Global layers.
+- [x] Implement `SlidingWindowAttention` logic in `turboquant/attention.go`.
+- [x] Add logic to switch between SWA and Global attention based on layer index.
+- [x] **Validation:** Verify context retrieval accuracy for both SWA and Global layers.
 
 ### 🔊 Phase 4: Audio & Reasoning Optimization (4-5 Days)
-- [ ] Extract and analyze radius distributions for audio embeddings.
-- [ ] Implement `AdaptiveQJL` bit-depth based on token presence.
-- [ ] **Validation:** End-to-end benchmark for audio-heavy and reasoning-heavy sequences.
+- [x] Extract and analyze radius distributions for audio embeddings.
+- [x] Implement `AdaptiveQJL` bit-depth based on token presence.
+- [x] **Validation:** End-to-end benchmark for audio-heavy and reasoning-heavy sequences.
 
 ---
 

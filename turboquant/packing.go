@@ -46,10 +46,11 @@ func Pack8BitReasoning(r_idx, theta_idx, sx, sy *Node) *Node {
 	t8 := ConvertType(theta_idx, dtypes.Uint8)
 	sx8 := ConvertType(sx, dtypes.Uint8)
 	sy8 := ConvertType(sy, dtypes.Uint8)
+	g := r8.Graph()
 
 	// r (bits 5-7), theta (bits 2-4), sx (bit 1), sy (bit 0)
-	packed := BitwiseOr(BitwiseShiftLeftScalar(BitwiseAnd(r8, Scalar(r8.Graph(), dtypes.Uint8, 0x07)), 5),
-		BitwiseOr(BitwiseShiftLeftScalar(BitwiseAnd(t8, Scalar(t8.Graph(), dtypes.Uint8, 0x07)), 2),
+	packed := BitwiseOr(BitwiseShiftLeftScalar(BitwiseAnd(r8, Scalar(g, dtypes.Uint8, 0x07)), 5),
+		BitwiseOr(BitwiseShiftLeftScalar(BitwiseAnd(t8, Scalar(g, dtypes.Uint8, 0x07)), 2),
 			BitwiseOr(BitwiseShiftLeftScalar(sx8, 1), sy8)))
 	return packed
 }

@@ -9,7 +9,7 @@ import (
 
 // TurboGemma4Block implements a single transformer block for Gemma 4.
 // It includes PLE (Per-Layer Embeddings) and uses TurboGemma4Attention.
-func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning bool) *Node {
+func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio bool) *Node {
 	ctx = ctx.In("gemma4_block")
 	hiddenDim := x.Shape().Dimensions[x.Rank()-1]
 
@@ -33,7 +33,7 @@ func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntr
 	}
 	q := layers.Dense(ctx.In("q_proj"), norm_x, false, hiddenDim)
 
-	attn_out := TurboGemma4Attention(ctx.In("attn"), q, k, v, cache, isEntryLayer, numHeads, headDim, useSWA, maxWindow, isReasoning)
+	attn_out := TurboGemma4Attention(ctx.In("attn"), q, k, v, cache, isEntryLayer, numHeads, headDim, useSWA, maxWindow, isReasoning, isAudio)
 
 	// 4. Residual 1
 	x = Add(x, attn_out)

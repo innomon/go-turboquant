@@ -57,7 +57,15 @@ func DequantizeRadiusAdaptive(indices *Node, isAudio bool) *Node {
 	codebook := Const(g, levels)
 	
 	intIndices := ConvertType(indices, dtypes.Int64)
-	expandedIndices := ExpandDims(intIndices, -1)
-	r := Gather(codebook, expandedIndices)
+	shape := intIndices.Shape()
+	
+	// Flatten to rank 1, gather, then reshape back.
+	flatIndices := Reshape(intIndices, -1)
+	expanded := ExpandDims(flatIndices, -1)
+	
+	// SimpleGo might handle rank-2 indices with indexVectorAxis=1 better.
+	flatR := Gather(codebook, expanded)
+	r := Reshape(flatR, shape.Dimensions...)
+	
 	return ConvertType(r, dtypes.Float32)
 }

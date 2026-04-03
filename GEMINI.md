@@ -62,6 +62,7 @@ func TurboAttention(ctx *context.Context, q, k, v *Node, numHeads, headDim int) 
     return turboquant.TurboGemmaAttention(ctx, q, k, v, numHeads, headDim)
 }
 ```
+**IMPORTANT**: remember to use CGO_ENABLED=1 while building GoMLX 
 
 ### API Access
 ```bash
