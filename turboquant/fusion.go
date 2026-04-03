@@ -6,50 +6,59 @@ import (
 )
 
 // TurboQuantize unifies the quantization process into a single computational graph.
-// It takes Cartesian (x, y) coordinates and returns a single packed 8-bit tensor.
 func TurboQuantize(x, y *Node) *Node {
-	// 1. Cartesian to Polar
-	r, theta := CartesianToPolar(x, y)
-	
-	// 2. Polar Quantization
-	r_idx := QuantizeRadius(r)
-	theta_idx := QuantizeAngle(theta)
-	
-	// 3. QJL Projection
-	// For residual calculation, we dequantize temporarily
-	r_polar := DequantizeRadius(r_idx)
-	theta_polar := DequantizeAngle(theta_idx)
-	x_polar, y_polar := PolarToCartesian(r_polar, theta_polar)
-	
-	// We only use 1-bit for x-component sign in this simplified 8-bit version
-	sign_x, _ := QJLProjection(x, y, x_polar, y_polar)
-	
-	// Convert sign to 0/1 for packing
-	qjl_sign := GreaterThan(sign_x, Scalar(x.Graph(), dtypes.Float32, 0.0))
-	
-	// 4. Bit-Packing
-	return Pack8Bit(r_idx, theta_idx, qjl_sign)
+	return TurboQuantizeAdaptive(x, y, false, false)
 }
 
 // TurboDequantize unifies the dequantization process into a single computational graph.
-// It takes a packed 8-bit tensor and returns reconstructed (x, y) Cartesian coordinates.
 func TurboDequantize(packed *Node) (x, y *Node) {
-	// 1. Unpacking
-	r_idx, theta_idx, qjl_sign := Unpack8Bit(packed)
-	
-	// 2. Polar Reconstruction
-	r_polar := DequantizeRadius(r_idx)
+	return TurboDequantizeAdaptive(packed, false, false)
+}
+
+// TurboQuantizeAdaptive supports switching bit-depth and codebooks.
+func TurboQuantizeAdaptive(x, y *Node, isReasoning, isAudio bool) *Node {
+	r, theta := CartesianToPolar(x, y)
+	r_idx := QuantizeRadiusAdaptive(r, isAudio)
+	theta_idx := QuantizeAngle(theta)
+
+	// Dequantize temporarily for residual
+	r_polar := DequantizeRadiusAdaptive(r_idx, isAudio)
 	theta_polar := DequantizeAngle(theta_idx)
 	x_polar, y_polar := PolarToCartesian(r_polar, theta_polar)
-	
-	// 3. QJL Correction
-	// map 0/1 back to -1/1 sign
+
+	sx, sy := QJLProjection(x, y, x_polar, y_polar)
+	sx_bit := GreaterThan(sx, Scalar(x.Graph(), dtypes.Float32, 0.0))
+	sy_bit := GreaterThan(sy, Scalar(x.Graph(), dtypes.Float32, 0.0))
+
+	if isReasoning {
+		// Use 2-bit QJL, 3-bit Radius, 3-bit Angle
+		return Pack8BitReasoning(r_idx, theta_idx, sx_bit, sy_bit)
+	}
+	// Standard: 1-bit QJL, 4-bit Radius, 3-bit Angle
+	return Pack8Bit(r_idx, theta_idx, sx_bit)
+}
+
+// TurboDequantizeAdaptive reconstructs based on reasoning and audio mode.
+func TurboDequantizeAdaptive(packed *Node, isReasoning, isAudio bool) (x, y *Node) {
 	g := packed.Graph()
-	sign := Sub(Mul(qjl_sign, Scalar(g, dtypes.Float32, 2.0)), Scalar(g, dtypes.Float32, 1.0))
-	
-	// Apply scale (approximate average residual)
-	scale := 0.05 
-	x, y = ApplyQJLCorrection(x_polar, y_polar, sign, Scalar(g, dtypes.Float32, 0.0), scale)
-	
+	var r_idx, theta_idx, sx, sy *Node
+
+	if isReasoning {
+		r_idx, theta_idx, sx, sy = Unpack8BitReasoning(packed)
+	} else {
+		r_idx, theta_idx, sx = Unpack8Bit(packed)
+		sy = Scalar(g, dtypes.Float32, 0.0)
+	}
+
+	r_polar := DequantizeRadiusAdaptive(r_idx, isAudio)
+	theta_polar := DequantizeAngle(theta_idx)
+	x_polar, y_polar := PolarToCartesian(r_polar, theta_polar)
+
+	// QJL Correction
+	sx_val := Sub(Mul(sx, Scalar(g, dtypes.Float32, 2.0)), Scalar(g, dtypes.Float32, 1.0))
+	sy_val := Sub(Mul(sy, Scalar(g, dtypes.Float32, 2.0)), Scalar(g, dtypes.Float32, 1.0))
+
+	scale := 0.05
+	x, y = ApplyQJLCorrection(x_polar, y_polar, sx_val, sy_val, scale)
 	return
 }

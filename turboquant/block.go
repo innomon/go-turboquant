@@ -13,10 +13,18 @@ func RMSNorm(ctx *context.Context, x *Node, epsilon float64) *Node {
 	ctx = ctx.In("rms_norm")
 	g := x.Graph()
 	ms := ReduceMean(Square(x), -1)
+	ms = ExpandDims(ms, -1) // Keep rank for broadcasting
 	invRms := Inverse(Sqrt(AddScalar(ms, epsilon)))
 	normalized := Mul(x, invRms)
 	hiddenDim := x.Shape().Dimensions[x.Rank()-1]
 	gamma := ctx.VariableWithShape("weight", shapes.Make(x.DType(), hiddenDim)).ValueGraph(g)
+	// Reshape gamma to [1, 1, ..., hiddenDim] to match rank of x
+	gammaDims := make([]int, x.Rank())
+	for i := 0; i < len(gammaDims)-1; i++ {
+		gammaDims[i] = 1
+	}
+	gammaDims[len(gammaDims)-1] = hiddenDim
+	gamma = Reshape(gamma, gammaDims...)
 	return Mul(normalized, gamma)
 }
 

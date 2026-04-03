@@ -8,8 +8,9 @@ import (
 
 // KVCache represents a compressed KV cache storage.
 type KVCache struct {
-	KPacked *Node
-	VPacked *Node
+	KPacked  *Node
+	VPacked  *Node
+	IsShared bool // If true, this cache is shared across multiple layers in a single pass.
 }
 
 // NewKVCache initializes an empty KV cache simulation.
@@ -17,14 +18,19 @@ func NewKVCache(g *Graph) *KVCache {
 	return &KVCache{}
 }
 
-// Update updates the KV cache with new packed tensors.
+// NewSharedKVCache initializes a shared KV cache.
+func NewSharedKVCache(g *Graph) *KVCache {
+	return &KVCache{IsShared: true}
+}
+
+// Update updates the KV cache with new packed tensors (e.g., from a new token).
 func (cache *KVCache) Update(kPacked, vPacked *Node) {
 	if cache.KPacked == nil {
 		cache.KPacked = kPacked
 		cache.VPacked = vPacked
 		return
 	}
-	// In a real implementation, this would involve Concatenate along the sequence axis.
+	// Append new tokens along the sequence axis (axis 1).
 	cache.KPacked = Concatenate([]*Node{cache.KPacked, kPacked}, 1)
 	cache.VPacked = Concatenate([]*Node{cache.VPacked, vPacked}, 1)
 }
