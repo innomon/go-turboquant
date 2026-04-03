@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 
 	"github.com/gomlx/gomlx/pkg/ml/context"
@@ -12,6 +13,10 @@ import (
 )
 
 func main() {
+	port := flag.Int("port", 8080, "Port to listen on")
+	weightsDir := flag.String("weights", "", "Directory containing .safetensors weights")
+	flag.Parse()
+
 	// 1. Initialize TurboQuant Backend
 	backend, err := turboquant.InitializeBackend()
 	if err != nil {
@@ -23,9 +28,10 @@ func main() {
 
 	// 3. Setup and Start API Server
 	server := &api.Server{
-		Backend: backend,
-		Context: ctx,
-		Port:    8080,
+		Backend:    backend,
+		Context:    ctx,
+		Port:       *port,
+		WeightsDir: *weightsDir,
 	}
 
 	if err := server.Start(); err != nil {

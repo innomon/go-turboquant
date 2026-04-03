@@ -12,9 +12,10 @@ import (
 
 // Server handles OpenAI-compatible requests for the TurboQuant engine.
 type Server struct {
-	Backend backends.Backend
-	Context *context.Context
-	Port    int
+	Backend    backends.Backend
+	Context    *context.Context
+	Port       int
+	WeightsDir string
 }
 
 // Model represents a simple OpenAI model object.
@@ -97,7 +98,57 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 // Start launches the HTTP server.
 func (s *Server) Start() error {
+	if s.WeightsDir != "" {
+		fmt.Printf("📦 Loading weights from %s...\n", s.WeightsDir)
+		if err := s.LoadWeights(); err != nil {
+			return fmt.Errorf("failed to load weights: %w", err)
+		}
+	}
 	mux := s.InitializeServer()
 	fmt.Printf("🚀 TurboQuant API server listening on :%d\n", s.Port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", s.Port), mux)
+}
+
+// LoadWeights loads safetensors from the WeightsDir.
+func (s *Server) LoadWeights() error {
+	files, err := filepath.Glob(filepath.Join(s.WeightsDir, "*.safetensors"))
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		st, err := safetensors.Deserialize(data)
+		if err != nil {
+			return err
+		}
+		for _, name := range st.Names() {
+			t, _ := st.Tensor(name)
+			gomlxScope := mapHuggingFaceToGoMLX(name)
+
+			dims := make([]int, len(t.Shape()))
+			for i, dim := range t.Shape() {
+				dims[i] = int(dim)
+			}
+
+			if t.DType() == safetensors.F32 {
+				tData := t.Data()
+				floatData := *(*[]float32)(unsafe.Pointer(&tData))
+				floatData = floatData[:len(tData)/4]
+				gmlxt := tensors.FromFlatDataAndDimensions(floatData, dims...)
+				s.Context.In(gomlxScope).VariableWithShape("weight", shapes.Make(gmlxt.DType(), dims...)).MustSetValue(gmlxt)
+			}
+		}
+	}
+	return nil
+}
+
+func mapHuggingFaceToGoMLX(hfName string) string {
+	name := strings.ReplaceAll(hfName, ".", "/")
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	return name
 }
