@@ -3,6 +3,8 @@
 This index centralizes the project's documentation and implementation tracking.
 
 ## Project Documentation
+- **[README](../README.md)**: Main project overview and getting started.
+- **[LICENSE](../LICENSE)**: Apache License 2.0.
 - **[Product Definition](./product.md)**: Goals, vision, and core features.
 - **[Tech Stack](./tech-stack.md)**: Core technologies and libraries.
 - **[TurboQuant Specification](./turboquant-spec.md)**: Technical details of the PolarQuant and QJL implementation.

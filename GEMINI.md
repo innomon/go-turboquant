@@ -1,5 +1,7 @@
 # GEMINI.md
 
+> **Status:** 🚧 Work in Progress (WIP)
+
 ## 🚀 Project Overview: TurboQuant-GoMLX
 This project implements **TurboQuant**, a state-of-the-art data-oblivious quantization framework, natively within **GoMLX**. It is specifically optimized for **Multimodal Small Language Models (MSLMs)**, such as the **Gemma 3** family, to enable ultra-efficient KV cache compression during long-context inference.
 
