@@ -48,9 +48,9 @@ Implement and verify the TurboQuant engine (PolarQuant + QJL) with efficient bit
 
 ### Phase 7: Gemma 3 Integration
 1.  **[x]** Implement `TurboGemmaAttention` wrapper in `turboquant/gemma.go`.
-2.  **[ ]** Create a simulation of a compressed KV cache storage.
-3.  **[ ]** Verify the precision loss of `TurboGemmaAttention` compared to standard `MultiHeadAttention`.
-4.  **[ ]** Integrate `TurboGemmaAttention` into a full Gemma 3 block (similar to `dyna-slm` pattern).
+2.  **[x]** Create a simulation of a compressed KV cache storage.
+3.  **[x]** Verify the precision loss of `TurboGemmaAttention` compared to standard `MultiHeadAttention`.
+4.  **[x]** Integrate `TurboGemmaAttention` into a full Gemma 3 block (similar to `dyna-slm` pattern).
 
 ## Alternatives Considered
 * **Standard Linear Quantization (e.g., bitsandbytes):** While easier to implement, it lacks the precision and data-oblivious properties of TurboQuant.
