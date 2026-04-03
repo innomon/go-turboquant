@@ -2,7 +2,10 @@ module github.com/gomlx/go-turboquant
 
 go 1.25.6
 
-require github.com/gomlx/gomlx v0.26.0
+require (
+	github.com/gomlx/gomlx v0.26.0
+	github.com/nlpodyssey/safetensors v0.0.0-20250209183917-bfb01cc25f7c
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

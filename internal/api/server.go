@@ -4,10 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/gomlx/pkg/core/shapes"
+	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/nlpodyssey/safetensors"
 )
 
 // Server handles OpenAI-compatible requests for the TurboQuant engine.
@@ -62,6 +69,8 @@ func (s *Server) InitializeServer() *http.ServeMux {
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	models := []Model{
 		{ID: "gemma-3-4b-turboquant", Object: "model", Created: time.Now().Unix(), OwnedBy: "turboquant"},
+		{ID: "gemma-4-2b-turboquant", Object: "model", Created: time.Now().Unix(), OwnedBy: "turboquant"},
+		{ID: "gemma-4-4b-turboquant", Object: "model", Created: time.Now().Unix(), OwnedBy: "turboquant"},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"data": models})
