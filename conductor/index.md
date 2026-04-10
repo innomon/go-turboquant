@@ -10,6 +10,10 @@ This index centralizes the project's documentation and implementation tracking.
 - **[TurboQuant Specification](./turboquant-spec.md)**: Technical details of the PolarQuant and QJL implementation.
 - **[TurboQuant Implementation Plan](./turboquant-plan.md)**: Phased implementation guide and verification steps.
 
+## Tracks & Implementation
+- **[Tracks Registry](./tracks.md)**: Master list of all project tracks.
+- **[Gemma 4 MTP Integration](./tracks/gemma4-integration/index.md)**: Track for MTP and speculative decoding.
+
 ## Workflow & Guidelines
 - **[Workflow](./workflow.md)**: Implementation process and standards.
 - **[Product Guidelines](./product-guidelines.md)**: Best practices for this project.

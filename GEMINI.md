@@ -3,12 +3,12 @@
 > **Status:** 🚧 Work in Progress (WIP)
 
 ## 🚀 Project Overview: TurboQuant-GoMLX
-This project implements **TurboQuant**, a state-of-the-art data-oblivious quantization framework, natively within **GoMLX**. It is specifically optimized for **Multimodal Small Language Models (MSLMs)**, such as the **Gemma 3** family, to enable ultra-efficient KV cache compression during long-context inference.
+This project implements **TurboQuant**, a state-of-the-art data-oblivious quantization framework, natively within **GoMLX**. It is specifically optimized for **Multimodal Small Language Models (MSLMs)**, such as the **Gemma 4** family, to enable ultra-efficient KV cache compression and **Multi-Token Prediction (MTP)** for accelerated inference.
 
 ### Key Objectives
 * **Memory Efficiency:** Achieve up to $6\times$ reduction in KV cache footprint (e.g., compressing 16-bit floats to 3-bit Polar + 1-bit QJL).
-* **Performance:** Leverage **XLA (Accelerated Linear Algebra)** via GoMLX to fuse quantization kernels, minimizing memory bandwidth bottlenecks.
-* **Modality Agnostic:** Unified compression for text, image, and audio tokens within the Gemma 3 unified embedding space.
+* **Performance:** Leverage **XLA (Accelerated Linear Algebra)** via GoMLX to fuse quantization kernels and MTP heads, minimizing memory bandwidth bottlenecks.
+* **Speculative Decoding:** Integrate 3-head MTP to predict tokens $t+1$ to $t+4$ in a single pass, achieving $>80$ tokens/sec on Apple M4.
 
 ---
 
@@ -26,10 +26,24 @@ $$\text{Error} = x_{original} - \text{Dequant}(x_{polar})$$
 $$QJL_{sign} = \text{Sign}(\text{Error} \cdot \Omega)$$
 where $\Omega$ is a fixed random orthogonal rotation matrix.
 
-### 3. Target Model: Gemma 3 (4B/12B)
-While compatible with any Transformer, this implementation is tuned for **Gemma 3**:
-* **Unified KV Cache:** Compresses visual tokens from the SigLIP encoder and text tokens identically.
-* **Layer-Adaptive:** Support for "Heavy-Hitter" (H2O) awareness, keeping critical attention heads at higher precision.
+### 3. Multi-Token Prediction (MTP)
+Gemma 4 integration includes a "Medusa-style" MTP architecture:
+### Speculative Decoding
+* **Heads:** 3 independent projection branches sharing the base model's unembedding matrix.
+* **Verification:** Tree-based speculative decoding logic to validate draft tokens against the base model.
+* **XLA Fusion:** Base LM head and MTP heads are fused into a single `gomlx.Tuple` for atomic GPU dispatch.
+
+### 4. Runtime Configurability
+The engine supports dynamic toggling of advanced features via `Gemma4Config`:
+* **`IncludeMTP`**: Toggles the generation of speculative draft tokens.
+* **`IncludeTurbo`**: Toggles the PolarQuant KV cache compression. When disabled, the model uses raw FP32 for comparative precision analysis.
+* **`UseSWA`**: Toggles Sliding Window Attention for local vs. global context.
+
+### 5. Weight Management & Checkpointing
+* **Base Weights**: Loaded from standard `.safetensors` files.
+* **MTP Checkpoints**: MTP head weights are stored as GoMLX checkpoints in `./checkpoints/mtp/`.
+* **Incremental Training**: The distillation loop automatically detects and restores existing MTP checkpoints to support additive training sessions.
+* **Inference Priority**: Trained MTP checkpoints override the base model's default MTP parameters during runtime.
 
 ---
 
@@ -37,39 +51,36 @@ While compatible with any Transformer, this implementation is tuned for **Gemma 
 
 - [x] **Core Math:** GoMLX graph implementation of Polar transforms and high-precision `Atan2` approximation.
 - [x] **Bit-Packing:** Custom Go utility to pack 3-bit/4-bit indices into `uint8` buffers.
-- [x] **XLA Fusion:** Optimization of the `TurboDequantize` kernel to run entirely in GPU SRAM.
+- [x] **XLA Fusion:** Optimization of the `TurboDequantize` kernel and MTP head bundling.
 - [x] **OpenAI API:** Fully functional OpenAI-compatible server for chat completions.
-- [x] **Gemma 3 Integration:** `TurboGemmaAttention` wrapper for seamless integration into transformer blocks.
+- [x] **Gemma 4 Integration:** `BuildGemma4Model` with MTP, Shared KV Cache, and Dual RoPE support.
+- [x] **MTP Training:** Self-distillation loop using Kiwix ZIM archives (Medicine subject).
 
 ---
 
 ## 📊 Performance Benchmarks (Projected)
 
-| Metric | Baseline (FP16) | TurboQuant (4-bit) | Improvement |
+| Metric | Baseline (FP16) | TurboQuant + MTP | Improvement |
 | :--- | :--- | :--- | :--- |
-| **Max Context (Gemma 3 4B)** | 16K Tokens | 96K Tokens | **6.0x** |
+| **Max Context (Gemma 4 4B)** | 16K Tokens | 128K Tokens | **8.0x** |
 | **Memory per Token** | 2.0 MB | 0.35 MB | **82% Reduction** |
-| **Inference Latency** | 1.0x | 1.15x* | *Slight compute overhead* |
+| **Throughput (M4)** | ~25 tok/sec | >80 tok/sec | **3.2x Speedup** |
 
 ---
 
 ## 📖 Usage in GoMLX
 
-### Engine Integration
+### MTP Training
 ```go
-// Wrapping a Gemma 3 Attention Layer
-func TurboAttention(ctx *context.Context, q, k, v *Node, numHeads, headDim int) *Node {
-    return turboquant.TurboGemmaAttention(ctx, q, k, v, numHeads, headDim)
-}
+// Training MTP heads on Medicine data
+turboquant.TrainMTP(ctx, turboquant.DefaultGemma4E4BConfig())
 ```
-**IMPORTANT**: remember to use CGO_ENABLED=1 while building GoMLX 
 
-### API Access
-```bash
-# Chat Completion via OpenAI-compatible API
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "gemma-3-4b-turboquant", "messages": [{"role": "user", "content": "How does KV cache compression work?"}]}'
+### Inference with Speculative Decoding
+```go
+// Verify and accept draft tokens
+result := turboquant.VerifyMTP(ctx, baseLogits, mtpLogits)
+fmt.Printf("Accepted %d tokens\n", result.AcceptCount)
 ```
 
 ---
@@ -77,7 +88,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 ## 📜 References
 * *Google Research (2025/26):* "TurboQuant: Data-Oblivious Compression for MSLMs." [TurboQuant blog](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)
 * *GoMLX Framework:* [github.com/gomlx/gomlx](https://github.com/gomlx/gomlx)
-* *Gemma 3 Technical Report:* [ai.google.dev/gemma](https://ai.google.dev/gemma)
+* *Gemma 4 Technical Report:* [ai.google.dev/gemma](https://ai.google.dev/gemma)
 
 ---
 *Created for the GoMLX Open Source Community.*

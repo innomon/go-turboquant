@@ -23,7 +23,8 @@ func NewSharedKVCache(g *Graph) *KVCache {
 	return &KVCache{IsShared: true}
 }
 
-// Update updates the KV cache with new packed tensors (e.g., from a new token).
+// Update updates the KV cache with new packed tensors (e.g., from one or more new tokens).
+// n is the number of tokens being accepted and committed to the cache.
 func (cache *KVCache) Update(kPacked, vPacked *Node) {
 	if cache.KPacked == nil {
 		cache.KPacked = kPacked
@@ -31,6 +32,7 @@ func (cache *KVCache) Update(kPacked, vPacked *Node) {
 		return
 	}
 	// Append new tokens along the sequence axis (axis 1).
+	// kPacked/vPacked can contain one or more tokens (e.g., from MTP acceptance).
 	cache.KPacked = Concatenate([]*Node{cache.KPacked, kPacked}, 1)
 	cache.VPacked = Concatenate([]*Node{cache.VPacked, vPacked}, 1)
 }

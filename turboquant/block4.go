@@ -8,24 +8,18 @@ import (
 )
 
 // TurboGemma4Block implements a single transformer block for Gemma 4.
-// It includes PLE (Per-Layer Embeddings) and uses TurboGemma4Attention.
-func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio bool) *Node {
+func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio bool, includeTurbo bool) *Node {
 	ctx = ctx.In("gemma4_block")
 	hiddenDim := x.Shape().Dimensions[x.Rank()-1]
 
-	// 1. PLE Integration
-	// Per-Layer Embeddings are projected and added to the input residual stream.
+	// ... (Norm and Projections logic same as before)
 	if ple != nil {
 		ple_proj := layers.Dense(ctx.In("ple_proj"), ple, true, hiddenDim)
 		x = Add(x, ple_proj)
 	}
 
-	// 2. Pre-Attention RMSNorm
 	norm_x := RMSNorm(ctx.In("pre_attn_norm"), x, 1e-6)
 
-	// 3. Attention
-	// For Shared KV Cache, k and v are projected from the norm_x.
-	// But in shared mode, only the entry layer projects them.
 	var k, v *Node
 	if isEntryLayer {
 		k = layers.Dense(ctx.In("k_proj"), norm_x, false, hiddenDim)
@@ -33,7 +27,7 @@ func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntr
 	}
 	q := layers.Dense(ctx.In("q_proj"), norm_x, false, hiddenDim)
 
-	attn_out := TurboGemma4Attention(ctx.In("attn"), q, k, v, cache, isEntryLayer, numHeads, headDim, useSWA, maxWindow, isReasoning, isAudio)
+	attn_out := TurboGemma4Attention(ctx.In("attn"), q, k, v, cache, isEntryLayer, numHeads, headDim, useSWA, maxWindow, isReasoning, isAudio, includeTurbo)
 
 	// 4. Residual 1
 	x = Add(x, attn_out)
