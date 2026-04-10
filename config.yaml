@@ -10,3 +10,6 @@ max_window: 8192.0
 num_mtp_heads: 3
 include_mtp: true
 include_turbo: true
+think_token_id: 5001
+audio_token_id: 5004
+# Reserved: 5002 (<|media_start|>), 5003 (<|media_end|>)

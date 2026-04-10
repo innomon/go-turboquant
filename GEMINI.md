@@ -70,6 +70,8 @@ The engine supports dynamic toggling of advanced features via `Gemma4Config`:
 
 ## 📖 Usage in GoMLX
 
+**Remember** for GoMLX builds use CGO_ENABLED=1 
+
 ### MTP Training
 ```go
 // Training MTP heads on Medicine data

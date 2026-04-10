@@ -20,6 +20,8 @@ type Gemma4Config struct {
 	NumMTPHeads  int     `yaml:"num_mtp_heads"`
 	IncludeMTP   bool    `yaml:"include_mtp"`
 	IncludeTurbo bool    `yaml:"include_turbo"`
+	ThinkTokenID int     `yaml:"think_token_id"`
+	AudioTokenID int     `yaml:"audio_token_id"`
 }
 
 // DefaultGemma4E4BConfig returns a default configuration for Gemma 4 E4B.
@@ -36,6 +38,8 @@ func DefaultGemma4E4BConfig() Gemma4Config {
 		NumMTPHeads:  3,
 		IncludeMTP:   true,
 		IncludeTurbo: true,
+		ThinkTokenID: 5001, // <|think|>
+		AudioTokenID: 5004, // <|audio|>
 	}
 }
 
@@ -43,6 +47,12 @@ func DefaultGemma4E4BConfig() Gemma4Config {
 // It returns a single Tuple node containing the base logits and MTP heads.
 func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Config) *Node {
 	ctx = ctx.In("gemma4")
+	g := tokens.Graph()
+
+	// 0. Adaptive State Detection (Reasoning / Audio)
+	// Check if any token in the current sequence triggers high-precision mode.
+	isReasoning := Any(Equal(tokens, Scalar(g, tokens.DType(), config.ThinkTokenID)))
+	isAudio := Any(Equal(tokens, Scalar(g, tokens.DType(), config.AudioTokenID)))
 	
 	// 1. Embedding
 	// embedWeight shape: [VocabSize, HiddenDim]
@@ -65,7 +75,7 @@ func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Conf
 		layerCtx := ctx.In(fmt.Sprintf("layer_%d", i))
 		isEntryLayer := (i == 0) 
 		
-		x = TurboGemma4Block(layerCtx, x, ple, caches[i], isEntryLayer, config.NumHeads, config.HeadDim, config.UseSWA, config.MaxWindow, false, false, config.IncludeTurbo)
+		x = TurboGemma4Block(layerCtx, x, ple, caches[i], isEntryLayer, config.NumHeads, config.HeadDim, config.UseSWA, config.MaxWindow, isReasoning, isAudio, config.IncludeTurbo)
 	}
 
 	// 3. Final Norm

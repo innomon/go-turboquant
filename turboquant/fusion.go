@@ -7,16 +7,16 @@ import (
 
 // TurboQuantize unifies the quantization process into a single computational graph.
 func TurboQuantize(x, y *Node) *Node {
-	return TurboQuantizeAdaptive(x, y, false, false)
+	return TurboQuantizeAdaptive(x, y, nil, nil)
 }
 
 // TurboDequantize unifies the dequantization process into a single computational graph.
 func TurboDequantize(packed *Node) (x, y *Node) {
-	return TurboDequantizeAdaptive(packed, false, false)
+	return TurboDequantizeAdaptive(packed, nil, nil)
 }
 
 // TurboQuantizeAdaptive supports switching bit-depth and codebooks.
-func TurboQuantizeAdaptive(x, y *Node, isReasoning, isAudio bool) *Node {
+func TurboQuantizeAdaptive(x, y *Node, isReasoning, isAudio *Node) *Node {
 	r, theta := CartesianToPolar(x, y)
 	r_idx := QuantizeRadiusAdaptive(r, isAudio)
 	theta_idx := QuantizeAngle(theta)
@@ -30,24 +30,32 @@ func TurboQuantizeAdaptive(x, y *Node, isReasoning, isAudio bool) *Node {
 	sx_bit := GreaterThan(sx, Scalar(x.Graph(), dtypes.Float32, 0.0))
 	sy_bit := GreaterThan(sy, Scalar(x.Graph(), dtypes.Float32, 0.0))
 
-	if isReasoning {
-		// Use 2-bit QJL, 3-bit Radius, 3-bit Angle
-		return Pack8BitReasoning(r_idx, theta_idx, sx_bit, sy_bit)
+	resStd := Pack8Bit(r_idx, theta_idx, sx_bit)
+	resReasoning := Pack8BitReasoning(r_idx, theta_idx, sx_bit, sy_bit)
+
+	if isReasoning == nil {
+		return resStd
 	}
-	// Standard: 1-bit QJL, 4-bit Radius, 3-bit Angle
-	return Pack8Bit(r_idx, theta_idx, sx_bit)
+	return Where(isReasoning, resReasoning, resStd)
 }
 
 // TurboDequantizeAdaptive reconstructs based on reasoning and audio mode.
-func TurboDequantizeAdaptive(packed *Node, isReasoning, isAudio bool) (x, y *Node) {
+func TurboDequantizeAdaptive(packed *Node, isReasoning, isAudio *Node) (x, y *Node) {
 	g := packed.Graph()
-	var r_idx, theta_idx, sx, sy *Node
+	
+	r_idx_std, theta_idx_std, sx_std := Unpack8Bit(packed)
+	sy_std := Scalar(g, dtypes.Float32, 0.0)
 
-	if isReasoning {
-		r_idx, theta_idx, sx, sy = Unpack8BitReasoning(packed)
+	r_idx_reas, theta_idx_reas, sx_reas, sy_reas := Unpack8BitReasoning(packed)
+
+	var r_idx, theta_idx, sx, sy *Node
+	if isReasoning == nil {
+		r_idx, theta_idx, sx, sy = r_idx_std, theta_idx_std, sx_std, sy_std
 	} else {
-		r_idx, theta_idx, sx = Unpack8Bit(packed)
-		sy = Scalar(g, dtypes.Float32, 0.0)
+		r_idx = Where(isReasoning, r_idx_reas, r_idx_std)
+		theta_idx = Where(isReasoning, theta_idx_reas, theta_idx_std)
+		sx = Where(isReasoning, sx_reas, sx_std)
+		sy = Where(isReasoning, sy_reas, sy_std)
 	}
 
 	r_polar := DequantizeRadiusAdaptive(r_idx, isAudio)

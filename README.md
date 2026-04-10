@@ -1,30 +1,30 @@
 # TurboQuant-GoMLX
 
-> **Status:** 🚧 Work in Progress (WIP) - Experimental implementation of data-oblivious quantization and speculative decoding.
+> **Status:** 🚀 **Gemma 4 Integration Complete** - High-performance implementation of data-oblivious quantization, adaptive reasoning, and speculative decoding.
 
 TurboQuant-GoMLX is a high-performance implementation of the **TurboQuant** quantization framework, natively built using **GoMLX**. It is designed to enable extreme KV cache compression (up to 8x reduction) and accelerated inference via **Multi-Token Prediction (MTP)** for models like **Gemma 4**.
 
 ## 🚀 Key Features
 
 *   **PolarQuant Engine:** Efficient transformation of Cartesian (x, y) latents into 4-bit radius (Lloyd-Max) and 3-bit angle coordinates.
-*   **QJL Residual Correction:** 1-bit residual correction to recover precision lost during extreme compression.
+*   **Adaptive QJL Correction:** **New!** Dynamic 1-bit or 2-bit residual correction. Automatically switches to 2-bit high-precision mode when `<|think|>` tokens are detected to preserve reasoning stability.
+*   **Multimodal Optimization:** **New!** Specialized radius distributions optimized for **USM-audio** tokens, ensuring high-fidelity compression for multimodal inputs.
+*   **Gemma 4 Integration:** Full support for Gemma 4 (E2B / E4B) featuring **Shared KV Cache**, **Per-Layer Embeddings (PLE)**, and **Dual RoPE**.
 *   **Multi-Token Prediction (MTP):** 3-head Medusa-style architecture for predicting up to 4 tokens in a single GPU pass.
 *   **Speculative Decoding:** Tree-based verification logic to boost throughput (targeting >80 tokens/sec on Apple M4).
 *   **XLA Graph Fusion:** Fully fused quantization/dequantization and MTP heads optimized for GPU execution.
-*   **Runtime Configurability:** Toggle MTP and TurboQuant independently via `Gemma4Config` for performance/precision trade-offs.
-*   **Gemma 4 Integration:** Ready-to-use `BuildGemma4Model` with Shared KV Cache and Dual RoPE.
 *   **OpenAI-Compatible API:** A Go-based HTTP server for chat completions and model metadata.
 
 ## 🤖 Model Support
 
-TurboQuant-GoMLX is architected to provide first-class support for both current and next-generation Gemma models:
+TurboQuant-GoMLX provides first-class support for the latest Gemma model families:
 
-*   **Gemma 4 (E2B / E4B):** Optimized support for the "Effective Parameters" architecture, featuring **Shared KV Cache**, **Per-Layer Embeddings (PLE)**, **Dual RoPE**, and **MTP Heads** for ultra-fast edge inference.
+*   **Gemma 4 (E2B / E4B):** Optimized support for the "Effective Parameters" architecture with **Adaptive Thinking Mode** and **Unified Multimodal Compression**.
 *   **Gemma 3 (4B / 12B / 27B):** Native integration for standard Transformer blocks with PolarQuant KV cache compression.
 
 ## ⚙️ Runtime Configurability
 
-TurboQuant-GoMLX allows you to dynamically toggle performance features via the `Gemma4Config` struct or a `.yaml` configuration file.
+TurboQuant-GoMLX allows you to dynamically toggle performance features via the `Gemma4Config` struct or a `.yaml` configuration file. The engine automatically detects specialized tokens to adjust precision.
 
 ### Using YAML Configuration
 
@@ -36,13 +36,15 @@ vocab_size: 256000
 num_layers: 24
 include_mtp: true
 include_turbo: true
+think_token_id: 5000
+audio_token_id: 5001
 ```
 
 #### Performance Impact Summary:
 - **`include_turbo`**: Reduces KV cache memory by **4-6x**.
 - **`include_mtp`**: Increases inference speed by **3.2x** via speculative decoding.
+- **Adaptive Precision**: Increases QJL depth only when needed (e.g., during "Thinking"), minimizing memory overhead while maximizing reasoning accuracy.
 - **`use_swa`**: Caps memory usage for contexts up to **128k+ tokens**.
-- **`num_mtp_heads`**: Higher values increase parallel generation potential.
 
 For a full reference of all parameters, see the [Technical Report](TURBOQUANT_TECHNICAL_REPORT.md#10-configuration-reference-gemma4config).
 

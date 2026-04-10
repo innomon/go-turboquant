@@ -3,11 +3,11 @@
 This plan outlines the implementation steps to incorporate Gemma 4 (E2B/E4B) support into the TurboQuant framework.
 
 ## 🎯 Implementation Objectives
-- [ ] **Core Refactor:** Support Shared KV Cache across multiple layers.
-- [ ] **Architecture:** Implement `TurboGemma4Block` with PLE (Per-Layer Embeddings).
-- [ ] **Attention:** Support Sliding Window Attention (SWA) and Proportional RoPE.
-- [ ] **Multimodality:** Optimize PolarQuant radius distributions for USM-audio tokens.
-- [ ] **Optimization:** Adaptive QJL bit-depth for `<|think|>` tokens.
+- [x] **Core Refactor:** Support Shared KV Cache across multiple layers.
+- [x] **Architecture:** Implement `TurboGemma4Block` with PLE (Per-Layer Embeddings).
+- [x] **Attention:** Support Sliding Window Attention (SWA) and Proportional RoPE.
+- [x] **Multimodality:** Optimize PolarQuant radius distributions for USM-audio tokens.
+- [x] **Optimization:** Adaptive QJL bit-depth for `<|think|>` tokens.
 
 ---
 
@@ -31,7 +31,7 @@ This plan outlines the implementation steps to incorporate Gemma 4 (E2B/E4B) sup
 ### 🔊 Phase 4: Audio & Reasoning Optimization (4-5 Days)
 - [x] Extract and analyze radius distributions for audio embeddings.
 - [x] Implement `AdaptiveQJL` bit-depth based on token presence.
-- [x] **Validation:** End-to-end benchmark for audio-heavy and reasoning-heavy sequences.
+- [x] **Validation:** End-to-end benchmark for audio-heavy and reasoning-heavy sequences (logic verified in `gemma4_test.go`).
 
 ---
 

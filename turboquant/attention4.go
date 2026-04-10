@@ -7,7 +7,7 @@ import (
 )
 
 // TurboGemma4Attention implements a Gemma 4 attention mechanism.
-func TurboGemma4Attention(ctx *context.Context, q, k, v *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio bool, includeTurbo bool) *Node {
+func TurboGemma4Attention(ctx *context.Context, q, k, v *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio *Node, includeTurbo bool) *Node {
 	ctx = ctx.In("turbo_attention_g4")
 	windowSize := 4096 // Default SWA window size for Gemma 4
 

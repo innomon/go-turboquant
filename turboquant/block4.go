@@ -8,7 +8,7 @@ import (
 )
 
 // TurboGemma4Block implements a single transformer block for Gemma 4.
-func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio bool, includeTurbo bool) *Node {
+func TurboGemma4Block(ctx *context.Context, x, ple *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio *Node, includeTurbo bool) *Node {
 	ctx = ctx.In("gemma4_block")
 	hiddenDim := x.Shape().Dimensions[x.Rank()-1]
 

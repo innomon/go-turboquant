@@ -18,54 +18,65 @@ var audioRadiusLevels = []float64{
 
 // QuantizeRadius maps radius r to one of 16 Lloyd-Max levels (4-bit).
 func QuantizeRadius(r *Node) *Node {
-	return QuantizeRadiusAdaptive(r, false)
+	return QuantizeRadiusAdaptive(r, nil)
 }
 
 // QuantizeRadiusAdaptive supports audio-optimized codebooks.
-func QuantizeRadiusAdaptive(r *Node, isAudio bool) *Node {
+func QuantizeRadiusAdaptive(r *Node, isAudio *Node) *Node {
 	g := r.Graph()
-	levels := defaultRadiusLevels
-	if isAudio {
-		levels = audioRadiusLevels
-	}
 	
-	thresholds := make([]float64, len(levels)-1)
-	for i := 0; i < len(thresholds); i++ {
-		thresholds[i] = (levels[i] + levels[i+1]) / 2.0
+	// Pre-calculate both options
+	levelsStd := defaultRadiusLevels
+	levelsAudio := audioRadiusLevels
+	
+	thresholdsStd := make([]float64, len(levelsStd)-1)
+	for i := 0; i < len(thresholdsStd); i++ {
+		thresholdsStd[i] = (levelsStd[i] + levelsStd[i+1]) / 2.0
 	}
 
-	indices := Scalar(g, dtypes.Float32, 0.0)
-	for _, t := range thresholds {
-		condition := GreaterThan(r, Scalar(g, dtypes.Float32, t))
-		indices = Add(indices, ConvertType(condition, dtypes.Float32))
+	thresholdsAudio := make([]float64, len(levelsAudio)-1)
+	for i := 0; i < len(thresholdsAudio); i++ {
+		thresholdsAudio[i] = (levelsAudio[i] + levelsAudio[i+1]) / 2.0
 	}
-	return indices
+
+	indicesStd := Scalar(g, dtypes.Float32, 0.0)
+	for _, t := range thresholdsStd {
+		indicesStd = Add(indicesStd, ConvertType(GreaterThan(r, Scalar(g, dtypes.Float32, t)), dtypes.Float32))
+	}
+
+	indicesAudio := Scalar(g, dtypes.Float32, 0.0)
+	for _, t := range thresholdsAudio {
+		indicesAudio = Add(indicesAudio, ConvertType(GreaterThan(r, Scalar(g, dtypes.Float32, t)), dtypes.Float32))
+	}
+
+	if isAudio == nil {
+		return indicesStd
+	}
+	return Where(isAudio, indicesAudio, indicesStd)
 }
 
 // DequantizeRadius reconstructs r from 4-bit indices.
 func DequantizeRadius(indices *Node) *Node {
-	return DequantizeRadiusAdaptive(indices, false)
+	return DequantizeRadiusAdaptive(indices, nil)
 }
 
 // DequantizeRadiusAdaptive reconstructs r using optional audio codebook.
-func DequantizeRadiusAdaptive(indices *Node, isAudio bool) *Node {
+func DequantizeRadiusAdaptive(indices *Node, isAudio *Node) *Node {
 	g := indices.Graph()
-	levels := defaultRadiusLevels
-	if isAudio {
-		levels = audioRadiusLevels
-	}
-	codebook := Const(g, levels)
+	
+	codebookStd := Const(g, defaultRadiusLevels)
+	codebookAudio := Const(g, audioRadiusLevels)
 	
 	intIndices := ConvertType(indices, dtypes.Int64)
 	shape := intIndices.Shape()
-	
-	// Flatten to rank 1, gather, then reshape back.
 	flatIndices := Reshape(intIndices, -1)
 	expanded := ExpandDims(flatIndices, -1)
 	
-	// SimpleGo might handle rank-2 indices with indexVectorAxis=1 better.
-	flatR := Gather(codebook, expanded)
-	r := Reshape(flatR, shape.Dimensions...)
+	resStd := Reshape(Gather(codebookStd, expanded), shape.Dimensions...)
+	resAudio := Reshape(Gather(codebookAudio, expanded), shape.Dimensions...)
 	
-	return ConvertType(r, dtypes.Float32)
+	if isAudio == nil {
+		return ConvertType(resStd, dtypes.Float32)
+	}
+	return ConvertType(Where(isAudio, resAudio, resStd), dtypes.Float32)
 }
