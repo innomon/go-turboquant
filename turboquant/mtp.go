@@ -18,7 +18,7 @@ func MTPHead(ctx *context.Context, hiddenStates *Node, vocabSize int, unembeddin
 	// 1. ResNet-style skip connection + Dense layer
 	// We project hiddenStates to the same dimension, apply SiLU, and add back.
 	projected := layers.Dense(ctx.In("proj"), hiddenStates, true, hiddenDim)
-	activated := activations.Silu(projected)
+	activated := activations.Swish(projected)
 	
 	// Residual connection
 	h := Add(hiddenStates, activated)
@@ -30,7 +30,7 @@ func MTPHead(ctx *context.Context, hiddenStates *Node, vocabSize int, unembeddin
 	if unembeddingWeight != nil {
 		// logits = h @ unembeddingWeight.T
 		// Assuming unembeddingWeight is [vocabSize, hiddenDim]
-		logits = MatMul(h, Transpose(unembeddingWeight))
+		logits = MatMul(h, Transpose(unembeddingWeight, 0, 1))
 	} else {
 		logits = layers.Dense(ctx.In("logits"), h, false, vocabSize)
 	}
@@ -48,7 +48,7 @@ func BuildGemma4MTP(ctx *context.Context, lastHiddenState *Node, vocabSize int, 
 	
 	// Base head
 	if unembeddingWeight != nil {
-		results[0] = MatMul(lastHiddenState, Transpose(unembeddingWeight))
+		results[0] = MatMul(lastHiddenState, Transpose(unembeddingWeight, 0, 1))
 	} else {
 		results[0] = layers.Dense(ctx.In("base_logits"), lastHiddenState, false, vocabSize)
 	}

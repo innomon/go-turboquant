@@ -2,7 +2,9 @@ package turboquant
 
 import (
 	"fmt"
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	. "github.com/gomlx/gomlx/pkg/core/graph"
+	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/ml/layers"
 )
@@ -44,23 +46,23 @@ func DefaultGemma4E4BConfig() Gemma4Config {
 }
 
 // BuildGemma4Model builds the full Gemma 4 model graph.
-// It returns a single Tuple node containing the base logits and MTP heads.
-func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Config) *Node {
+// It returns a slice of nodes containing the base logits and MTP heads.
+func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Config) []*Node {
 	ctx = ctx.In("gemma4")
 	g := tokens.Graph()
 
 	// 0. Adaptive State Detection (Reasoning / Audio)
 	// Check if any token in the current sequence triggers high-precision mode.
-	isReasoning := Any(Equal(tokens, Scalar(g, tokens.DType(), config.ThinkTokenID)))
-	isAudio := Any(Equal(tokens, Scalar(g, tokens.DType(), config.AudioTokenID)))
+	isReasoning := LogicalAny(Equal(tokens, Scalar(g, tokens.DType(), config.ThinkTokenID)))
+	isAudio := LogicalAny(Equal(tokens, Scalar(g, tokens.DType(), config.AudioTokenID)))
 	
 	// 1. Embedding
 	// embedWeight shape: [VocabSize, HiddenDim]
-	embedVar := ctx.In("embedding").VariableWithShape("weight", config.VocabSize, config.HiddenDim)
-	embedWeight := embedVar.Node(tokens.Graph())
+	embedVar := ctx.In("embedding").VariableWithShape("weight", shapes.Make(dtypes.Float32, config.VocabSize, config.HiddenDim))
+	embedWeight := embedVar.ValueGraph(tokens.Graph())
 	
 	// Use the built-in embedding layer (assuming it handles weights internally via context)
-	x := layers.Embedding(ctx.In("embedding"), tokens, config.VocabSize, config.HiddenDim)
+	x := layers.Embedding(ctx.In("embedding"), tokens, dtypes.Float32, config.VocabSize, config.HiddenDim)
 	
 	// Scaling factor for embeddings (Gemma style)
 	x = MulScalar(x, 1.0) // Gemma 2/4 often scales by sqrt(hiddenDim)
@@ -79,7 +81,7 @@ func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Conf
 	}
 
 	// 3. Final Norm
-	x = layers.RMSNorm(ctx.In("final_norm"), x, -1).Done()
+	x = layers.RMSNorm(ctx.In("final_norm"), x).WithNormalizationAxes(-1).Done()
 
 	// 4. MTP / LM Heads
 	var logits []*Node
@@ -88,8 +90,8 @@ func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Conf
 		logits = BuildGemma4MTP(ctx, x, config.VocabSize, embedWeight, config.NumMTPHeads)
 	} else {
 		// Standard LM Head
-		logits = []*Node{MatMul(x, Transpose(embedWeight))}
+		logits = []*Node{MatMul(x, Transpose(embedWeight, 0, 1))}
 	}
 	
-	return Tuple(logits...)
+	return logits
 }

@@ -17,12 +17,18 @@ func LoadMTPCheckpoints(ctx *context.Context, checkpointPath string) error {
 	if _, err := os.Stat(checkpointPath); os.IsNotExist(err) {
 		return fmt.Errorf("checkpoint path %s does not exist", checkpointPath)
 	}
-	cp := checkpoints.New(ctx, checkpointPath)
-	return cp.Restore()
+	_, err := checkpoints.Build(ctx).Dir(checkpointPath).Done()
+	return err
 }
 
 // TrainMTP performs self-distillation training for the MTP heads.
 func TrainMTP(ctx *context.Context, config Gemma4Config, checkpointPath string) {
+	backend, err := InitializeBackend()
+	if err != nil {
+		fmt.Printf("❌ Failed to initialize backend: %v\n", err)
+		return
+	}
+
 	// 0. Load existing MTP weights if they exist (Incremental Training)
 	fmt.Printf("📂 Checking for existing MTP weights in %s...\n", checkpointPath)
 	if err := LoadMTPCheckpoints(ctx, checkpointPath); err == nil {
@@ -32,22 +38,24 @@ func TrainMTP(ctx *context.Context, config Gemma4Config, checkpointPath string) 
 	}
 
 	// 1. Define Optimizer
-	opt := optimizers.Adagrad().LearningRate(1e-4).Done()
+	opt := optimizers.Adam().Done()
 	_ = opt // used in training loop
 
 	// 2. Training Step (XLA Compiled)
 	// inputs: [batch, seq]
 	// targets: [batch, seq] x (NumMTPHeads + 1)
-	trainStep := context.NewExec(ctx.Backend(), ctx, func(ctx *context.Context, inputs *Node, targets []*Node) *Node {
-		// Get full model output (Tuple of base + MTP logits)
+	trainStep, err := context.NewExec(backend, ctx, func(ctx *context.Context, inputs, target0, target1, target2, target3 *Node) *Node {
+		// Get full model output (Slice of base + MTP logits)
 		modelOutput := BuildGemma4Model(ctx, inputs, nil, config)
 		
 		var totalLoss *Node
 		numOutputs := config.NumMTPHeads + 1
+		allTargets := []*Node{target0, target1, target2, target3}
 		for i := 0; i < numOutputs; i++ {
-			logits := GetTupleItem(modelOutput, i)
-			// SparseSoftmaxCrossEntropy expects targets as integer indices.
-			loss := losses.SparseSoftmaxCrossEntropy(targets[i], logits)
+			logits := modelOutput[i]
+			// SparseCategoricalCrossEntropyLogits expects targets as integer indices.
+			// It takes []*Node for labels and predictions.
+			loss := losses.SparseCategoricalCrossEntropyLogits([]*Node{allTargets[i]}, []*Node{logits})
 			if totalLoss == nil {
 				totalLoss = loss
 			} else {
@@ -57,6 +65,10 @@ func TrainMTP(ctx *context.Context, config Gemma4Config, checkpointPath string) 
 		
 		return totalLoss
 	})
+	if err != nil {
+		fmt.Printf("❌ Failed to create training step: %v\n", err)
+		return
+	}
 
 	fmt.Println("🚀 Starting MTP Distillation Training on Medicine ZIM data...")
 	// ... (Loop logic)
@@ -69,6 +81,10 @@ func TrainMTP(ctx *context.Context, config Gemma4Config, checkpointPath string) 
 
 // SaveMTPCheckpoints saves only the MTP head weights.
 func SaveMTPCheckpoints(ctx *context.Context, checkpointPath string) {
-	cp := checkpoints.New(ctx, checkpointPath)
+	cp, err := checkpoints.Build(ctx).Dir(checkpointPath).Done()
+	if err != nil {
+		fmt.Printf("❌ Failed to save checkpoint: %v\n", err)
+		return
+	}
 	cp.Save()
 }
