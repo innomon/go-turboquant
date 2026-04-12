@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	. "github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/ml/context"
@@ -22,19 +23,27 @@ func TestSharedKVCache(t *testing.T) {
 	headDim := 32
 	hiddenDim := headDim * numHeads
 
+	cache := NewSharedKVCache("shared_kv_0")
+
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, q1, k1, v1, q2 *Node) (out1, out2 *Node) {
-		g := q1.Graph()
-		cache := NewSharedKVCache(g)
+		if ctx.GetVariableByScopeAndName("/"+cache.Name, "k_cache") == nil {
+			cache.InitializeVariables(ctx, batchSize, 8192, hiddenDim/2, dtypes.Uint8)
+		}
 		
 		// Layer 1 forward (Entry Layer)
-		out1 = TurboGemma4Attention(ctx.In("layer1"), q1, k1, v1, cache, true, numHeads, headDim, false, 8192.0, nil, nil, false)
+		out1 = TurboGemma4Attention(ctx.In("layer1"), q1, k1, v1, cache, true, numHeads, headDim, false, 8192.0, nil, nil, true)
 
 		// Layer 2 forward (different Q, same K/V parameters)
-		out2 = TurboGemma4Attention(ctx.In("layer2"), q2, nil, nil, cache, false, numHeads, headDim, false, 8192.0, nil, nil, false)
+		out2 = TurboGemma4Attention(ctx.In("layer2"), q2, nil, nil, cache, false, numHeads, headDim, false, 8192.0, nil, nil, true)
 		return
 	})
 	if err != nil {
 		t.Fatalf("Failed to create execution: %v", err)
+	}
+
+	err = ctx.InitializeVariables(backend, nil)
+	if err != nil {
+		t.Fatalf("Failed to initialize variables: %v", err)
 	}
 
 	q1_val := tensors.FromScalarAndDimensions(float32(1.0), batchSize, seqLen, hiddenDim)
@@ -65,16 +74,25 @@ func TestGemma4Block(t *testing.T) {
 	hiddenDim := headDim * numHeads
 	pleDim := 128
 
+	cache := NewSharedKVCache("shared_kv_block")
+
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, x, ple *Node) (out *Node) {
-		g := x.Graph()
-		cache := NewSharedKVCache(g)
+		if ctx.GetVariableByScopeAndName("/"+cache.Name, "k_cache") == nil {
+			cache.InitializeVariables(ctx, batchSize, 8192, hiddenDim/2, dtypes.Uint8)
+		}
 		
 		// Full block with PLE
-		out = TurboGemma4Block(ctx, x, ple, cache, true, numHeads, headDim, false, 8192.0, nil, nil, false)
+		// TurboGemma4Block(ctx, x, ple, k, v, cache, isEntryLayer, numHeads, headDim, useSWA, maxWindow, isReasoning, isAudio, includeTurbo)
+		out = TurboGemma4Block(ctx, x, ple, nil, nil, cache, true, numHeads, headDim, false, 8192.0, nil, nil, true)
 		return
 	})
 	if err != nil {
 		t.Fatalf("Failed to create execution: %v", err)
+	}
+
+	err = ctx.InitializeVariables(backend, nil)
+	if err != nil {
+		t.Fatalf("Failed to initialize variables: %v", err)
 	}
 
 	x_val := tensors.FromScalarAndDimensions(float32(0.1), batchSize, seqLen, hiddenDim)
@@ -105,15 +123,23 @@ func TestSWA(t *testing.T) {
 	headDim := 32
 	hiddenDim := headDim * numHeads
 
+	cache := NewSharedKVCache("shared_kv_swa")
+
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, q, k, v *Node) (out *Node) {
-		g := q.Graph()
-		cache := NewSharedKVCache(g)
+		if ctx.GetVariableByScopeAndName("/"+cache.Name, "k_cache") == nil {
+			cache.InitializeVariables(ctx, batchSize, 8192, hiddenDim/2, dtypes.Uint8)
+		}
 		// Use SWA with 4096 window
-		out = TurboGemma4Attention(ctx, q, k, v, cache, true, numHeads, headDim, true, 8192.0, nil, nil, false)
+		out = TurboGemma4Attention(ctx, q, k, v, cache, true, numHeads, headDim, true, 8192.0, nil, nil, true)
 		return
 	})
 	if err != nil {
 		t.Fatalf("Failed to create execution: %v", err)
+	}
+
+	err = ctx.InitializeVariables(backend, nil)
+	if err != nil {
+		t.Fatalf("Failed to initialize variables: %v", err)
 	}
 
 	q_val := tensors.FromScalarAndDimensions(float32(1.0), batchSize, seqLen, hiddenDim)
@@ -143,14 +169,17 @@ func TestDualRoPE(t *testing.T) {
 	hiddenDim := numHeads * headDim
 
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, x *Node) (ropeSWA, ropeGlobal *Node) {
+		g := x.Graph()
 		// Reshape to rank 4 for RoPE test
 		x4 := Reshape(x, batchSize, seqLen, numHeads, headDim)
+		offset := Scalar(g, dtypes.Int32, 0)
+		currentLen := Scalar(g, dtypes.Float32, float64(seqLen))
 
 		// 1. Standard RoPE (SWA)
-		ropeSWA = ApplyRoPE(x4, 10000.0)
+		ropeSWA = ApplyRoPEWithOffset(x4, offset, 10000.0)
 		
 		// 2. Proportional RoPE (Global) - long sequence
-		ropeGlobal = ApplyProportionalRoPE(x4, 10000.0, float64(seqLen), 64.0)
+		ropeGlobal = ApplyProportionalRoPE(x4, offset, 10000.0, currentLen, 64.0)
 		return
 	})
 	if err != nil {
@@ -180,8 +209,8 @@ func TestReasoningMode(t *testing.T) {
 
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, x, y *Node) (std, reasoning *Node) {
 		g := x.Graph()
-		isTrue := Scalar(g, dtypes.Bool, true)
-		isFalse := Scalar(g, dtypes.Bool, false)
+		isTrue := Const(g, true)
+		isFalse := Const(g, false)
 
 		// Test standard mode
 		packedStd := TurboQuantizeAdaptive(x, y, isFalse, isFalse)

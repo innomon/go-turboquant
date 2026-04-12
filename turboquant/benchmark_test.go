@@ -3,10 +3,11 @@ package turboquant
 import (
 	"testing"
 
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/gomlx/pkg/ml/layers"
+	"github.com/gomlx/gomlx/pkg/ml/layers/attention"
 )
 
 func BenchmarkAttention(b *testing.B) {
@@ -23,9 +24,11 @@ func BenchmarkAttention(b *testing.B) {
 	headDim := 32
 	hiddenDim := numHeads * headDim
 
+	cache := NewKVCache("bench_layer_0")
+
 	// Exec for Standard Attention
 	execStandard, err := context.NewExec(backend, ctx, func(ctx *context.Context, q, k, v *graph.Node) *graph.Node {
-		mha := layers.MultiHeadAttention(ctx.In("standard"), q, k, v, numHeads, hiddenDim)
+		mha := attention.MultiHeadAttention(ctx.In("standard"), q, k, v, numHeads, hiddenDim)
 		return mha.Done()
 	})
 	if err != nil {
@@ -34,7 +37,10 @@ func BenchmarkAttention(b *testing.B) {
 
 	// Exec for TurboQuant Attention
 	execTurbo, err := context.NewExec(backend, ctx, func(ctx *context.Context, q, k, v *graph.Node) *graph.Node {
-		return TurboGemmaAttention(ctx.In("turbo"), q, k, v, numHeads, headDim)
+		if ctx.GetVariableByScopeAndName("/"+cache.Name, "k_cache") == nil {
+			cache.InitializeVariables(ctx, batchSize, seqLen, headDim*numHeads/2, dtypes.Uint8)
+		}
+		return TurboGemmaAttention(ctx.In("turbo"), q, k, v, cache, numHeads, headDim)
 	})
 	if err != nil {
 		b.Fatalf("Failed to create turbo execution: %v", err)

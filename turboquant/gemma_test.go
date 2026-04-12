@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
@@ -30,7 +31,7 @@ func TestTurboGemmaAttention(t *testing.T) {
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, q, k, v *graph.Node) (mha_out, turbo_out *graph.Node) {
 		// Initialize variables if they don't exist
 		if ctx.GetVariableByScopeAndName("/"+cache.Name, "k_cache") == nil {
-			cache.InitializeVariables(ctx, batchSize, seqLen, headDim*numHeads/2)
+			cache.InitializeVariables(ctx, batchSize, seqLen, headDim*numHeads/2, dtypes.Uint8)
 		}
 		// 1. Standard Attention (Baseline)
 		mha := attention.MultiHeadAttention(ctx.In("standard"), q, k, v, numHeads, hiddenDim)

@@ -78,7 +78,11 @@ func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Conf
 		cacheName := fmt.Sprintf("kv_cache_group_%d", i/8)
 		cache := NewKVCache(cacheName)
 		if i%8 == 0 {
-			cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim)
+			cacheDType := dtypes.Uint8
+			if !config.IncludeTurbo {
+				cacheDType = dtypes.Float32
+			}
+			cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim, cacheDType)
 		}
 		caches = append(caches, cache)
 	}

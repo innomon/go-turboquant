@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	. "github.com/gomlx/gomlx/pkg/core/graph"
@@ -24,7 +25,7 @@ func TestKVCacheStatefulness(t *testing.T) {
 	packedDim := hiddenDim / 2 // TurboQuant packs pairs
 
 	cache := NewKVCache("test_layer_0")
-	cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim)
+	cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim, dtypes.Uint8)
 	
 	// Define the graph for one step.
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, q, k, v *Node) *Node {

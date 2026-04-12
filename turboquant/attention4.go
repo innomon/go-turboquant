@@ -2,6 +2,7 @@ package turboquant
 
 import (
 	"fmt"
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	. "github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/ml/layers/attention"
@@ -68,17 +69,17 @@ func TurboGemma4Attention(ctx *context.Context, q, k, v *Node, cache *KVCache, i
 
 	// 3. Dequantize or use raw contents
 	var k_prime, v_prime *Node
-	k_packed_full, v_packed_full, mask := cache.GetContents(ctx, g)
+	k_full, v_full, mask := cache.GetContents(ctx, g)
 	
-	if includeTurbo {
-		k_x_recon, k_y_recon := TurboDequantizeAdaptive(k_packed_full, isReasoning, isAudio)
-		v_x_recon, v_y_recon := TurboDequantizeAdaptive(v_packed_full, isReasoning, isAudio)
+	if cache.DType() == dtypes.Uint8 {
+		k_x_recon, k_y_recon := TurboDequantizeAdaptive(k_full, isReasoning, isAudio)
+		v_x_recon, v_y_recon := TurboDequantizeAdaptive(v_full, isReasoning, isAudio)
 		
 		k_prime = Concatenate([]*Node{k_x_recon, k_y_recon}, 2)
 		v_prime = Concatenate([]*Node{v_x_recon, v_y_recon}, 2)
 	} else {
-		k_prime = k_packed_full
-		v_prime = v_packed_full
+		k_prime = k_full
+		v_prime = v_full
 	}
 
 	// SWA Slicing
