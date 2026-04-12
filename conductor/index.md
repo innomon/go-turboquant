@@ -13,6 +13,7 @@ This index centralizes the project's documentation and implementation tracking.
 ## Tracks & Implementation
 - **[Tracks Registry](./tracks.md)**: Master list of all project tracks.
 - **[Gemma 4 MTP Integration](./tracks/gemma4-integration/index.md)**: Track for MTP and speculative decoding.
+- **[MedGemma 1.5 Support](./tracks/medgemma-1.5/plan.md)**: Track for medical multimodal vision and long-context.
 
 ## Workflow & Guidelines
 - **[Workflow](./workflow.md)**: Implementation process and standards.

@@ -27,3 +27,10 @@
 * **Description:** Refactor the KV cache to support state persistence, efficient memory allocation (Padded Buffers), and dynamic axis/rank handling.
 * **Lead Developer:** Gemini CLI
 * **Link:** [./tracks/kv-cache-refinement/plan.md](./tracks/kv-cache-refinement/plan.md)
+
+## MedGemma 1.5 Integration Track
+* **Track ID:** `medgemma-1.5`
+* **Status:** 0% Complete
+* **Description:** Implement multimodal vision support (Medical SigLIP), token interleaving, and long-context clinical history processing for MedGemma 1.5.
+* **Lead Developer:** Gemini CLI
+* **Link:** [./tracks/medgemma-1.5/plan.md](./tracks/medgemma-1.5/plan.md)
