@@ -65,11 +65,14 @@ If you need to train MTP heads for a specific domain (e.g., Medicine), use the b
 CGO_ENABLED=1 GOMLX_BACKEND=xla go run ./turboquant/train.go --zim ./data/medicine.zim --checkpoint ./checkpoints/mtp/
 ```
 
-### 4. Load Weights for Inference
+### 4. Build and Run the API Server
 The TurboQuant API server automatically merges the base Gemma 4 weights with any existing MTP checkpoints found in the configuration path.
 
 ```bash
-# Weights from .safetensors merged with MTP checkpoint from ./checkpoints/mtp/
+# 1. Build the API server
+CGO_ENABLED=1 go build -o turboquant-api ./cmd/api
+
+# 2. Run with weights and (optional) MTP checkpoint
 ./turboquant-api --weights ./models/gemma-4-e4b-it --mtp-checkpoint ./checkpoints/mtp/
 ```
 

@@ -15,6 +15,7 @@ import (
 func main() {
 	port := flag.Int("port", 8080, "Port to listen on")
 	weightsDir := flag.String("weights", "", "Directory containing .safetensors weights")
+	mtpCheckpoint := flag.String("mtp-checkpoint", "", "Path to MTP checkpoint directory")
 	flag.Parse()
 
 	// 1. Initialize TurboQuant Backend
@@ -28,10 +29,11 @@ func main() {
 
 	// 3. Setup and Start API Server
 	server := &api.Server{
-		Backend:    backend,
-		Context:    ctx,
-		Port:       *port,
-		WeightsDir: *weightsDir,
+		Backend:       backend,
+		Context:       ctx,
+		Port:          *port,
+		WeightsDir:    *weightsDir,
+		MTPCheckpoint: *mtpCheckpoint,
 	}
 
 	if err := server.Start(); err != nil {

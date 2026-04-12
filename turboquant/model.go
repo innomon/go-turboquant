@@ -8,9 +8,9 @@ import (
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/ml/layers"
 )
-
-// Gemma4Config holds the hyperparameters for the Gemma 4 model.
+// Gemma4Config holds the hyperparameters for the Gemma models.
 type Gemma4Config struct {
+	ModelType    string  `yaml:"model_type"` // "gemma3" or "gemma4"
 	VocabSize    int     `yaml:"vocab_size"`
 	NumLayers    int     `yaml:"num_layers"`
 	NumHeads     int     `yaml:"num_heads"`
@@ -29,6 +29,7 @@ type Gemma4Config struct {
 // DefaultGemma4E4BConfig returns a default configuration for Gemma 4 E4B.
 func DefaultGemma4E4BConfig() Gemma4Config {
 	return Gemma4Config{
+		ModelType:    "gemma4",
 		VocabSize:    256000,
 		NumLayers:    24,
 		NumHeads:     16,
@@ -43,6 +44,62 @@ func DefaultGemma4E4BConfig() Gemma4Config {
 		ThinkTokenID: 5001, // <|think|>
 		AudioTokenID: 5004, // <|audio|>
 	}
+}
+
+// DefaultGemma3Config returns a default configuration for Gemma 3.
+func DefaultGemma3Config() Gemma4Config {
+	return Gemma4Config{
+		ModelType:    "gemma3",
+		VocabSize:    256000,
+		NumLayers:    28,
+		NumHeads:     16,
+		HeadDim:      128,
+		HiddenDim:    2048,
+		IncludeTurbo: true,
+	}
+}
+
+// BuildGemma3Model builds the full Gemma 3 model graph.
+func BuildGemma3Model(ctx *context.Context, tokens *Node, config Gemma4Config) []*Node {
+	ctx = ctx.In("gemma3")
+	g := tokens.Graph()
+
+	// 1. Embedding
+	embedVar := ctx.In("embedding").VariableWithShape("weight", shapes.Make(dtypes.Float32, config.VocabSize, config.HiddenDim))
+	embedWeight := embedVar.ValueGraph(g)
+	x := layers.Embedding(ctx.In("embedding"), tokens, dtypes.Float32, config.VocabSize, config.HiddenDim)
+
+	// 2. Transformer Blocks
+	var caches []*KVCache
+	maxSeqLen := 8192
+	packedDim := config.HiddenDim / 2
+	if !config.IncludeTurbo {
+		packedDim = config.HiddenDim
+	}
+	batchSize := tokens.Shape().Dimensions[0]
+
+	for i := 0; i < config.NumLayers; i++ {
+		cache := NewKVCache(fmt.Sprintf("kv_cache_%d", i))
+		cacheDType := dtypes.Uint8
+		if !config.IncludeTurbo {
+			cacheDType = dtypes.Float32
+		}
+		cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim, cacheDType)
+		caches = append(caches, cache)
+	}
+
+	intermediateDim := config.HiddenDim * 4 // Generic intermediate dim
+	for i := 0; i < config.NumLayers; i++ {
+		layerCtx := ctx.In(fmt.Sprintf("layer_%d", i))
+		x = TurboGemmaBlock(layerCtx, x, caches[i], config.NumHeads, config.HeadDim, intermediateDim)
+	}
+
+	// 3. Final Norm
+	x = RMSNorm(ctx.In("final_norm"), x, 1e-6)
+
+	// 4. Head
+	logits := MatMul(x, Transpose(embedWeight, 0, 1))
+	return []*Node{logits}
 }
 
 // BuildGemma4Model builds the full Gemma 4 model graph.
