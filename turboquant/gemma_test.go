@@ -7,7 +7,7 @@ import (
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/gomlx/pkg/ml/layers"
+	"github.com/gomlx/gomlx/pkg/ml/layers/attention"
 )
 
 func TestTurboGemmaAttention(t *testing.T) {
@@ -26,17 +26,27 @@ func TestTurboGemmaAttention(t *testing.T) {
 	hiddenDim := numHeads * headDim
 	
 	// Use context.Exec to handle parameters automatically
+	cache := NewKVCache("test_layer_0")
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, q, k, v *graph.Node) (mha_out, turbo_out *graph.Node) {
+		// Initialize variables if they don't exist
+		if ctx.GetVariableByScopeAndName("/"+cache.Name, "k_cache") == nil {
+			cache.InitializeVariables(ctx, batchSize, seqLen, headDim*numHeads/2)
+		}
 		// 1. Standard Attention (Baseline)
-		mha := layers.MultiHeadAttention(ctx.In("standard"), q, k, v, numHeads, hiddenDim)
+		mha := attention.MultiHeadAttention(ctx.In("standard"), q, k, v, numHeads, hiddenDim)
 		mha_out = mha.Done()
 		
 		// 2. TurboQuant Attention
-		turbo_out = TurboGemmaAttention(ctx.In("turbo"), q, k, v, numHeads, headDim)
+		turbo_out = TurboGemmaAttention(ctx.In("turbo"), q, k, v, cache, numHeads, headDim)
 		return
 	})
 	if err != nil {
 		t.Fatalf("Failed to create execution: %v", err)
+	}
+
+	err = ctx.InitializeVariables(backend, nil)
+	if err != nil {
+		t.Fatalf("Failed to initialize variables: %v", err)
 	}
 
 	// Create dummy inputs as tensors

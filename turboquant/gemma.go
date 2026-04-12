@@ -1,75 +1,145 @@
 package turboquant
 
 import (
+	"fmt"
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	. "github.com/gomlx/gomlx/pkg/core/graph"
+	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/gomlx/pkg/ml/layers"
+	"github.com/gomlx/gomlx/pkg/ml/layers/attention"
 )
 
-// KVCache represents a compressed KV cache storage.
+// KVCache represents a compressed KV cache storage backed by persistent variables.
 type KVCache struct {
-	KPacked  *Node
-	VPacked  *Node
+	Name     string
 	IsShared bool // If true, this cache is shared across multiple layers in a single pass.
 }
 
-// NewKVCache initializes an empty KV cache simulation.
-func NewKVCache(g *Graph) *KVCache {
-	return &KVCache{}
+// NewKVCache initializes a KV cache handle.
+func NewKVCache(name string) *KVCache {
+	return &KVCache{Name: name}
 }
 
-// NewSharedKVCache initializes a shared KV cache.
-func NewSharedKVCache(g *Graph) *KVCache {
-	return &KVCache{IsShared: true}
+// NewSharedKVCache initializes a shared KV cache handle.
+func NewSharedKVCache(name string) *KVCache {
+	return &KVCache{Name: name, IsShared: true}
 }
 
-// Update updates the KV cache with new packed tensors (e.g., from one or more new tokens).
-// n is the number of tokens being accepted and committed to the cache.
-func (cache *KVCache) Update(kPacked, vPacked *Node) {
-	if cache.KPacked == nil {
-		cache.KPacked = kPacked
-		cache.VPacked = vPacked
-		return
+// InitializeVariables pre-allocates the persistent variables in the context.
+func (cache *KVCache) InitializeVariables(ctx *context.Context, batchSize, maxSeqLen, packedDim int) {
+	cacheCtx := ctx.In(cache.Name)
+	cacheCtx.VariableWithShape("k_cache", shapes.Make(dtypes.Uint8, batchSize, maxSeqLen, packedDim)).SetTrainable(false)
+	cacheCtx.VariableWithShape("v_cache", shapes.Make(dtypes.Uint8, batchSize, maxSeqLen, packedDim)).SetTrainable(false)
+	cacheCtx.VariableWithShape("current_len", shapes.Make(dtypes.Int32, 1)).SetTrainable(false)
+}
+
+// Update updates the persistent KV cache with new packed tensors using DynamicUpdateSlice.
+func (cache *KVCache) Update(ctx *context.Context, kPacked, vPacked *Node) {
+	g := kPacked.Graph()
+	// Access variables relative to the cache name with absolute scope.
+	absScope := "/" + cache.Name
+	kCacheVar := ctx.GetVariableByScopeAndName(absScope, "k_cache")
+	vCacheVar := ctx.GetVariableByScopeAndName(absScope, "v_cache")
+	lenVar := ctx.GetVariableByScopeAndName(absScope, "current_len")
+	
+	if kCacheVar == nil {
+		panic(fmt.Sprintf("KV Cache variable 'k_cache' not found in scope %s (abs: %s)", cache.Name, absScope))
 	}
-	// Append new tokens along the sequence axis (axis 1).
-	// kPacked/vPacked can contain one or more tokens (e.g., from MTP acceptance).
-	cache.KPacked = Concatenate([]*Node{cache.KPacked, kPacked}, 1)
-	cache.VPacked = Concatenate([]*Node{cache.VPacked, vPacked}, 1)
+	
+	currentLen := Reshape(lenVar.ValueGraph(g)) // []
+	
+	startIndices := []*Node{
+		Scalar(g, dtypes.Int32, 0),
+		ConvertType(currentLen, dtypes.Int32),
+		Scalar(g, dtypes.Int32, 0),
+	}
+	
+	newKCache := DynamicUpdateSlice(kCacheVar.ValueGraph(g), kPacked, startIndices)
+	newVCache := DynamicUpdateSlice(vCacheVar.ValueGraph(g), vPacked, startIndices)
+	
+	kCacheVar.SetValueGraph(newKCache)
+	vCacheVar.SetValueGraph(newVCache)
+	
+	numNewTokens := Scalar(g, dtypes.Int32, kPacked.Shape().Dimensions[1])
+	newLen := Add(currentLen, numNewTokens)
+	lenVar.SetValueGraph(Reshape(newLen, 1))
+}
+
+// GetContents returns the KV cache and a mask for valid tokens.
+func (cache *KVCache) GetContents(ctx *context.Context, g *Graph) (kPacked, vPacked, mask *Node) {
+	absScope := "/" + cache.Name
+	kCacheVarObj := ctx.GetVariableByScopeAndName(absScope, "k_cache")
+	if kCacheVarObj == nil {
+		panic(fmt.Sprintf("KV Cache variable 'k_cache' not found in scope %s (abs: %s)", cache.Name, absScope))
+	}
+	
+	kCacheVar := kCacheVarObj.ValueGraph(g)
+	vCacheVar := ctx.GetVariableByScopeAndName(absScope, "v_cache").ValueGraph(g)
+	lenVar := ctx.GetVariableByScopeAndName(absScope, "current_len").ValueGraph(g)
+	currentLen := Reshape(lenVar) // []
+	
+	// Create mask: [batch, total_seq]
+	seqLen := kCacheVar.Shape().Dimensions[1]
+	indices := Iota(g, shapes.Make(dtypes.Int32, seqLen), 0)
+	mask = LessThan(indices, currentLen) // [total_seq]
+	batchSize := kCacheVar.Shape().Dimensions[0]
+	mask = Reshape(mask, 1, seqLen)
+	mask = BroadcastToDims(mask, batchSize, seqLen)
+	
+	kPacked = kCacheVar
+	vPacked = vCacheVar
+	return
 }
 
 // TurboGemmaAttention implements a Gemma 3 attention mechanism with integrated
-// TurboQuant KV cache compression.
-func TurboGemmaAttention(ctx *context.Context, q, k, v *Node, numHeads, headDim int) *Node {
-	ctx = ctx.In("turbo_attention")
+func TurboGemmaAttention(ctx *context.Context, q, k, v *Node, cache *KVCache, numHeads, headDim int) *Node {
+	g := q.Graph()
+	// 1. Apply RoPE to Q and K
+	batchSize := q.Shape().Dimensions[0]
+	qSeqLen := q.Shape().Dimensions[1]
 	
-	// 1. KV Quantization (Polar + QJL)
-	hiddenDim := k.Shape().Dimensions[k.Rank()-1]
+	// Access cache with absolute scope
+	absScope := "/" + cache.Name
+	lenVarObj := ctx.GetVariableByScopeAndName(absScope, "current_len")
+	if lenVarObj == nil {
+		panic(fmt.Sprintf("Variable 'current_len' not found in scope %s (abs: %s)", cache.Name, absScope))
+	}
+	lenVar := lenVarObj.ValueGraph(g)
+	currentLen := Reshape(lenVar) // []
+	
+	q = Reshape(q, batchSize, qSeqLen, numHeads, headDim)
+	k = Reshape(k, batchSize, qSeqLen, numHeads, headDim)
+	
+	q = ApplyRoPEWithOffset(q, currentLen, 10000.0)
+	k = ApplyRoPEWithOffset(k, currentLen, 10000.0)
+	
+	q = Reshape(q, batchSize, qSeqLen, numHeads*headDim)
+	k = Reshape(k, batchSize, qSeqLen, numHeads*headDim)
+	
+	// 2. KV Quantization (Polar + QJL)
+	hiddenAxis := k.Rank() - 1
+	hiddenDim := k.Shape().Dimensions[hiddenAxis]
 	mid := hiddenDim / 2
 	
 	k_x := Slice(k, AxisRange(), AxisRange(), AxisRange(0, mid))
 	k_y := Slice(k, AxisRange(), AxisRange(), AxisRange(mid, hiddenDim))
-	
 	v_x := Slice(v, AxisRange(), AxisRange(), AxisRange(0, mid))
 	v_y := Slice(v, AxisRange(), AxisRange(), AxisRange(mid, hiddenDim))
 	
-	// Quantize
 	k_packed := TurboQuantize(k_x, k_y)
 	v_packed := TurboQuantize(v_x, v_y)
+	cache.Update(ctx, k_packed, v_packed)
 	
-	// --- Simulation of Stateful Storage ---
-	// We use a context variable to persist the cache across calls if needed.
-	// For this simulation, we just show the "Update" logic.
-	cache := &KVCache{KPacked: k_packed, VPacked: v_packed}
+	// 3. Retrieve and Dequantize full cache
+	k_packed_full, v_packed_full, mask := cache.GetContents(ctx, g)
 	
-	// 2. On-the-fly Dequantization
-	k_x_recon, k_y_recon := TurboDequantize(cache.KPacked)
-	v_x_recon, v_y_recon := TurboDequantize(cache.VPacked)
+	k_x_recon, k_y_recon := TurboDequantize(k_packed_full)
+	v_x_recon, v_y_recon := TurboDequantize(v_packed_full)
 	
-	// Reconstruct K and V tensors
 	k_prime := Concatenate([]*Node{k_x_recon, k_y_recon}, 2)
 	v_prime := Concatenate([]*Node{v_x_recon, v_y_recon}, 2)
 	
-	// 3. Standard Multi-Head Attention using dequantized values
-	mha := layers.MultiHeadAttention(ctx, q, k_prime, v_prime, numHeads, numHeads*headDim)
-	return mha.Done()
+	// 4. Standard Multi-Head Attention using dequantized values
+	mha := attention.MultiHeadAttention(ctx.In("attention"), q, k_prime, v_prime, numHeads, numHeads*headDim)
+	return mha.SetKeyMask(mask).Done()
 }

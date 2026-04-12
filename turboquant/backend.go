@@ -18,8 +18,8 @@ func InitializeBackend() (backends.Backend, error) {
 
 	backend, err := backends.New()
 	if err != nil {
-		log.Printf("⚠️ Failed to initialize %s backend: %v. Falling back to simplego.", backendName, err)
-		os.Setenv("GOMLX_BACKEND", "simplego")
+		log.Printf("⚠️ Failed to initialize %s backend: %v. Falling back to go.", backendName, err)
+		os.Setenv("GOMLX_BACKEND", "go")
 		backend, err = backends.New()
 		if err != nil {
 			return nil, err

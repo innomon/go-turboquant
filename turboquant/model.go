@@ -64,20 +64,32 @@ func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Conf
 	// Use the built-in embedding layer (assuming it handles weights internally via context)
 	x := layers.Embedding(ctx.In("embedding"), tokens, dtypes.Float32, config.VocabSize, config.HiddenDim)
 	
-	// Scaling factor for embeddings (Gemma style)
-	x = MulScalar(x, 1.0) // Gemma 2/4 often scales by sqrt(hiddenDim)
-
-	// 2. Transformer Blocks
+	// 2. Transformer Blocks Initialization
+	// We use a shared KV cache every 8 layers (example for Gemma 4).
 	var caches []*KVCache
+	maxSeqLen := 8192 // Fixed for this graph
+	packedDim := config.HiddenDim / 2
+	if !config.IncludeTurbo {
+		packedDim = config.HiddenDim
+	}
+	batchSize := tokens.Shape().Dimensions[0]
+
 	for i := 0; i < config.NumLayers; i++ {
-		caches = append(caches, NewSharedKVCache(tokens.Graph()))
+		cacheName := fmt.Sprintf("kv_cache_group_%d", i/8)
+		cache := NewKVCache(cacheName)
+		if i%8 == 0 {
+			cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim)
+		}
+		caches = append(caches, cache)
 	}
 
 	for i := 0; i < config.NumLayers; i++ {
 		layerCtx := ctx.In(fmt.Sprintf("layer_%d", i))
-		isEntryLayer := (i == 0) 
+		isEntryLayer := (i % 8 == 0)
 		
-		x = TurboGemma4Block(layerCtx, x, ple, caches[i], isEntryLayer, config.NumHeads, config.HeadDim, config.UseSWA, config.MaxWindow, isReasoning, isAudio, config.IncludeTurbo)
+		// K and V projections are only needed at the entry layer of a shared group.
+		// These will be calculated inside the block if isEntryLayer is true.
+		x = TurboGemma4Block(layerCtx, x, ple, nil, nil, caches[i], isEntryLayer, config.NumHeads, config.HeadDim, config.UseSWA, config.MaxWindow, isReasoning, isAudio, config.IncludeTurbo)
 	}
 
 	// 3. Final Norm
@@ -86,7 +98,6 @@ func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Conf
 	// 4. MTP / LM Heads
 	var logits []*Node
 	if config.IncludeMTP {
-		// Use embedWeight for unembedding (weight sharing)
 		logits = BuildGemma4MTP(ctx, x, config.VocabSize, embedWeight, config.NumMTPHeads)
 	} else {
 		// Standard LM Head

@@ -20,3 +20,10 @@
 * **Description:** Incorporate Gemma 4 (E2B/E4B) support with Shared KV Cache, PLE, and Native Audio-aware PolarQuant.
 * **Lead Developer:** Gemini CLI
 * **Link:** [./tracks/gemma4-integration/plan.md](./tracks/gemma4-integration/plan.md)
+
+## KV Cache Refinement Track
+* **Track ID:** `kv-cache-refinement`
+* **Status:** 0% Complete
+* **Description:** Refactor the KV cache to support state persistence, efficient memory allocation (Padded Buffers), and dynamic axis/rank handling.
+* **Lead Developer:** Gemini CLI
+* **Link:** [./tracks/kv-cache-refinement/plan.md](./tracks/kv-cache-refinement/plan.md)

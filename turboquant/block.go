@@ -40,14 +40,13 @@ func MLP(ctx *context.Context, x *Node, intermediateDim int) *Node {
 }
 
 // TurboGemmaBlock represents a single Gemma 3 transformer layer with TurboQuant attention.
-func TurboGemmaBlock(ctx *context.Context, x *Node, numHeads, headDim, intermediateDim int) *Node {
+func TurboGemmaBlock(ctx *context.Context, x *Node, cache *KVCache, numHeads, headDim, intermediateDim int) *Node {
 	// 1. Pre-Attention Norm
 	normX := RMSNorm(ctx.In("pre_attention_norm"), x, 1e-6)
 
 	// 2. TurboQuant Attention
 	// For this block, we assume k and v are projected from the same normX
-	// In a real model, these would be separate projections.
-	attn := TurboGemmaAttention(ctx.In("attention"), normX, normX, normX, numHeads, headDim)
+	attn := TurboGemmaAttention(ctx.In("attention"), normX, normX, normX, cache, numHeads, headDim)
 	x = Add(x, attn)
 
 	// 3. Pre-MLP Norm
