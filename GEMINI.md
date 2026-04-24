@@ -70,7 +70,10 @@ The engine supports dynamic toggling of advanced features via `Gemma4Config`:
 
 ## 📖 Usage in GoMLX
 
-**Remember** for GoMLX builds use CGO_ENABLED=1 
+**Remember** for GoMLX builds use CGO_ENABLED=1.
+
+### Select your Backend
+GoMLX supports multiple backends (XLA, Apple Silicon Native, Pure Go). For Apple Silicon M4 users, **`go-darwinml`** is the recommended choice for maximum performance. See **[conductor/tech-stack.md](./conductor/tech-stack.md#gomlx-backends-2026)** for a full list of available backends and setup tips.
 
 ### MTP Training
 ```go
