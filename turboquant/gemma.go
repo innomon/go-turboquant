@@ -97,8 +97,13 @@ func (cache *KVCache) GetContents(ctx *context.Context, g *Graph) (kPacked, vPac
 	return
 }
 
-// TurboGemmaAttention implements a Gemma 3 attention mechanism with integrated
+// TurboGemmaAttention implements a Gemma 3 attention mechanism.
 func TurboGemmaAttention(ctx *context.Context, q, k, v *Node, cache *KVCache, numHeads, headDim int) *Node {
+	return TurboGemmaAttentionAdaptive(ctx, q, k, v, cache, numHeads, headDim, nil, nil)
+}
+
+// TurboGemmaAttentionAdaptive implements an adaptive Gemma 3 attention mechanism.
+func TurboGemmaAttentionAdaptive(ctx *context.Context, q, k, v *Node, cache *KVCache, numHeads, headDim int, isAudio, isMedical *Node) *Node {
 	g := q.Graph()
 	// 1. Apply RoPE to Q and K
 	batchSize := q.Shape().Dimensions[0]
@@ -132,15 +137,15 @@ func TurboGemmaAttention(ctx *context.Context, q, k, v *Node, cache *KVCache, nu
 	v_x := Slice(v, AxisRange(), AxisRange(), AxisRange(0, mid))
 	v_y := Slice(v, AxisRange(), AxisRange(), AxisRange(mid, hiddenDim))
 
-	k_packed := TurboQuantize(k_x, k_y)
-	v_packed := TurboQuantize(v_x, v_y)
+	k_packed := TurboQuantizeAdaptive(k_x, k_y, nil, isAudio, isMedical)
+	v_packed := TurboQuantizeAdaptive(v_x, v_y, nil, isAudio, isMedical)
 	cache.Update(ctx, k_packed, v_packed)
 
 	// 3. Retrieve and Dequantize full cache
 	k_packed_full, v_packed_full, mask := cache.GetContents(ctx, g)
 
-	k_x_recon, k_y_recon := TurboDequantize(k_packed_full)
-	v_x_recon, v_y_recon := TurboDequantize(v_packed_full)
+	k_x_recon, k_y_recon := TurboDequantizeAdaptive(k_packed_full, nil, isAudio, isMedical)
+	v_x_recon, v_y_recon := TurboDequantizeAdaptive(v_packed_full, nil, isAudio, isMedical)
 
 	k_prime := Concatenate([]*Node{k_x_recon, k_y_recon}, 2)
 	v_prime := Concatenate([]*Node{v_x_recon, v_y_recon}, 2)

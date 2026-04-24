@@ -9,7 +9,7 @@ import (
 )
 
 // TurboGemma4Attention implements a Gemma 4 attention mechanism with persistent KV cache.
-func TurboGemma4Attention(ctx *context.Context, q, k, v *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio *Node, includeTurbo bool) *Node {
+func TurboGemma4Attention(ctx *context.Context, q, k, v *Node, cache *KVCache, isEntryLayer bool, numHeads, headDim int, useSWA bool, maxWindow float64, isReasoning, isAudio, isMedical *Node, includeTurbo bool) *Node {
 	ctx = ctx.In("turbo_attention_g4")
 	g := q.Graph()
 	windowSize := 4096 // Default SWA window size for Gemma 4
@@ -58,8 +58,8 @@ func TurboGemma4Attention(ctx *context.Context, q, k, v *Node, cache *KVCache, i
 			v_x := Slice(v, AxisRange(), AxisRange(), AxisRange(0, mid))
 			v_y := Slice(v, AxisRange(), AxisRange(), AxisRange(mid, hiddenDim))
 			
-			k_packed := TurboQuantizeAdaptive(k_x, k_y, isReasoning, isAudio)
-			v_packed := TurboQuantizeAdaptive(v_x, v_y, isReasoning, isAudio)
+			k_packed := TurboQuantizeAdaptive(k_x, k_y, isReasoning, isAudio, isMedical)
+			v_packed := TurboQuantizeAdaptive(v_x, v_y, isReasoning, isAudio, isMedical)
 			cache.Update(ctx, k_packed, v_packed)
 		} else {
 			// No TurboQuant: Store raw float32
@@ -72,8 +72,8 @@ func TurboGemma4Attention(ctx *context.Context, q, k, v *Node, cache *KVCache, i
 	k_full, v_full, mask := cache.GetContents(ctx, g)
 	
 	if cache.DType() == dtypes.Uint8 {
-		k_x_recon, k_y_recon := TurboDequantizeAdaptive(k_full, isReasoning, isAudio)
-		v_x_recon, v_y_recon := TurboDequantizeAdaptive(v_full, isReasoning, isAudio)
+		k_x_recon, k_y_recon := TurboDequantizeAdaptive(k_full, isReasoning, isAudio, isMedical)
+		v_x_recon, v_y_recon := TurboDequantizeAdaptive(v_full, isReasoning, isAudio, isMedical)
 		
 		k_prime = Concatenate([]*Node{k_x_recon, k_y_recon}, 2)
 		v_prime = Concatenate([]*Node{v_x_recon, v_y_recon}, 2)

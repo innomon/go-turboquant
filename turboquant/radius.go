@@ -16,56 +16,62 @@ var audioRadiusLevels = []float64{
 	0.0, 0.2, 0.5, 0.9, 1.4, 2.0, 2.8, 3.8, 5.0, 6.5, 8.5, 11.0, 14.5, 19.0, 25.0, 35.0,
 }
 
-// QuantizeRadius maps radius r to one of 16 Lloyd-Max levels (4-bit).
-func QuantizeRadius(r *Node) *Node {
-	return QuantizeRadiusAdaptive(r, nil)
+// medicalRadiusLevels is optimized for MedGemma 1.5 latent manifold.
+var medicalRadiusLevels = []float64{
+	0.0, 0.05, 0.12, 0.22, 0.35, 0.52, 0.75, 1.05, 1.45, 2.0, 2.7, 3.6, 4.8, 6.4, 8.5, 12.0,
 }
 
-// QuantizeRadiusAdaptive supports audio-optimized codebooks.
-func QuantizeRadiusAdaptive(r *Node, isAudio *Node) *Node {
-	g := r.Graph()
-	
-	// Pre-calculate both options
+// QuantizeRadius maps radius r to one of 16 Lloyd-Max levels (4-bit).
+func QuantizeRadius(r *Node) *Node {
+	return QuantizeRadiusAdaptive(r, nil, nil)
+}
+
+// QuantizeRadiusAdaptive supports audio and medical optimized codebooks.
+func QuantizeRadiusAdaptive(r *Node, isAudio, isMedical *Node) *Node {
+	// Codebooks
 	levelsStd := defaultRadiusLevels
 	levelsAudio := audioRadiusLevels
+	levelsMed := medicalRadiusLevels
 	
-	thresholdsStd := make([]float64, len(levelsStd)-1)
-	for i := 0; i < len(thresholdsStd); i++ {
-		thresholdsStd[i] = (levelsStd[i] + levelsStd[i+1]) / 2.0
-	}
+	indicesStd := getQuantizedIndices(r, levelsStd)
+	indicesAudio := getQuantizedIndices(r, levelsAudio)
+	indicesMed := getQuantizedIndices(r, levelsMed)
 
-	thresholdsAudio := make([]float64, len(levelsAudio)-1)
-	for i := 0; i < len(thresholdsAudio); i++ {
-		thresholdsAudio[i] = (levelsAudio[i] + levelsAudio[i+1]) / 2.0
+	res := indicesStd
+	if isAudio != nil {
+		res = Where(isAudio, indicesAudio, res)
 	}
+	if isMedical != nil {
+		res = Where(isMedical, indicesMed, res)
+	}
+	return res
+}
 
-	indicesStd := Scalar(g, dtypes.Float32, 0.0)
-	for _, t := range thresholdsStd {
-		indicesStd = Add(indicesStd, ConvertType(GreaterThan(r, Scalar(g, dtypes.Float32, t)), dtypes.Float32))
+func getQuantizedIndices(r *Node, levels []float64) *Node {
+	g := r.Graph()
+	thresholds := make([]float64, len(levels)-1)
+	for i := 0; i < len(thresholds); i++ {
+		thresholds[i] = (levels[i] + levels[i+1]) / 2.0
 	}
-
-	indicesAudio := Scalar(g, dtypes.Float32, 0.0)
-	for _, t := range thresholdsAudio {
-		indicesAudio = Add(indicesAudio, ConvertType(GreaterThan(r, Scalar(g, dtypes.Float32, t)), dtypes.Float32))
+	indices := Scalar(g, dtypes.Float32, 0.0)
+	for _, t := range thresholds {
+		indices = Add(indices, ConvertType(GreaterThan(r, Scalar(g, dtypes.Float32, t)), dtypes.Float32))
 	}
-
-	if isAudio == nil {
-		return indicesStd
-	}
-	return Where(isAudio, indicesAudio, indicesStd)
+	return indices
 }
 
 // DequantizeRadius reconstructs r from 4-bit indices.
 func DequantizeRadius(indices *Node) *Node {
-	return DequantizeRadiusAdaptive(indices, nil)
+	return DequantizeRadiusAdaptive(indices, nil, nil)
 }
 
-// DequantizeRadiusAdaptive reconstructs r using optional audio codebook.
-func DequantizeRadiusAdaptive(indices *Node, isAudio *Node) *Node {
+// DequantizeRadiusAdaptive reconstructs r using optional audio/medical codebook.
+func DequantizeRadiusAdaptive(indices *Node, isAudio, isMedical *Node) *Node {
 	g := indices.Graph()
 	
 	codebookStd := Const(g, defaultRadiusLevels)
 	codebookAudio := Const(g, audioRadiusLevels)
+	codebookMed := Const(g, medicalRadiusLevels)
 	
 	intIndices := ConvertType(indices, dtypes.Int64)
 	shape := intIndices.Shape()
@@ -74,9 +80,14 @@ func DequantizeRadiusAdaptive(indices *Node, isAudio *Node) *Node {
 	
 	resStd := Reshape(Gather(codebookStd, expanded), shape.Dimensions...)
 	resAudio := Reshape(Gather(codebookAudio, expanded), shape.Dimensions...)
+	resMed := Reshape(Gather(codebookMed, expanded), shape.Dimensions...)
 	
-	if isAudio == nil {
-		return ConvertType(resStd, dtypes.Float32)
+	res := resStd
+	if isAudio != nil {
+		res = Where(isAudio, resAudio, res)
 	}
-	return ConvertType(Where(isAudio, resAudio, resStd), dtypes.Float32)
+	if isMedical != nil {
+		res = Where(isMedical, resMed, res)
+	}
+	return ConvertType(res, dtypes.Float32)
 }

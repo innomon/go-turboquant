@@ -7,22 +7,22 @@ import (
 
 // TurboQuantize unifies the quantization process into a single computational graph.
 func TurboQuantize(x, y *Node) *Node {
-	return TurboQuantizeAdaptive(x, y, nil, nil)
+	return TurboQuantizeAdaptive(x, y, nil, nil, nil)
 }
 
 // TurboDequantize unifies the dequantization process into a single computational graph.
 func TurboDequantize(packed *Node) (x, y *Node) {
-	return TurboDequantizeAdaptive(packed, nil, nil)
+	return TurboDequantizeAdaptive(packed, nil, nil, nil)
 }
 
 // TurboQuantizeAdaptive supports switching bit-depth and codebooks.
-func TurboQuantizeAdaptive(x, y *Node, isReasoning, isAudio *Node) *Node {
+func TurboQuantizeAdaptive(x, y *Node, isReasoning, isAudio, isMedical *Node) *Node {
 	r, theta := CartesianToPolar(x, y)
-	r_idx := QuantizeRadiusAdaptive(r, isAudio)
+	r_idx := QuantizeRadiusAdaptive(r, isAudio, isMedical)
 	theta_idx := QuantizeAngle(theta)
 
 	// Dequantize temporarily for residual
-	r_polar := DequantizeRadiusAdaptive(r_idx, isAudio)
+	r_polar := DequantizeRadiusAdaptive(r_idx, isAudio, isMedical)
 	theta_polar := DequantizeAngle(theta_idx)
 	x_polar, y_polar := PolarToCartesian(r_polar, theta_polar)
 
@@ -40,7 +40,7 @@ func TurboQuantizeAdaptive(x, y *Node, isReasoning, isAudio *Node) *Node {
 }
 
 // TurboDequantizeAdaptive reconstructs based on reasoning and audio mode.
-func TurboDequantizeAdaptive(packed *Node, isReasoning, isAudio *Node) (x, y *Node) {
+func TurboDequantizeAdaptive(packed *Node, isReasoning, isAudio, isMedical *Node) (x, y *Node) {
 	g := packed.Graph()
 	
 	r_idx_std, theta_idx_std, sx_std := Unpack8Bit(packed)
@@ -58,7 +58,7 @@ func TurboDequantizeAdaptive(packed *Node, isReasoning, isAudio *Node) (x, y *No
 		sy = Where(isReasoning, sy_reas, sy_std)
 	}
 
-	r_polar := DequantizeRadiusAdaptive(r_idx, isAudio)
+	r_polar := DequantizeRadiusAdaptive(r_idx, isAudio, isMedical)
 	theta_polar := DequantizeAngle(theta_idx)
 	x_polar, y_polar := PolarToCartesian(r_polar, theta_polar)
 

@@ -31,10 +31,10 @@ func TestSharedKVCache(t *testing.T) {
 		}
 		
 		// Layer 1 forward (Entry Layer)
-		out1 = TurboGemma4Attention(ctx.In("layer1"), q1, k1, v1, cache, true, numHeads, headDim, false, 8192.0, nil, nil, true)
+		out1 = TurboGemma4Attention(ctx.In("layer1"), q1, k1, v1, cache, true, numHeads, headDim, false, 8192.0, nil, nil, nil, true)
 
 		// Layer 2 forward (different Q, same K/V parameters)
-		out2 = TurboGemma4Attention(ctx.In("layer2"), q2, nil, nil, cache, false, numHeads, headDim, false, 8192.0, nil, nil, true)
+		out2 = TurboGemma4Attention(ctx.In("layer2"), q2, nil, nil, cache, false, numHeads, headDim, false, 8192.0, nil, nil, nil, true)
 		return
 	})
 	if err != nil {
@@ -82,8 +82,8 @@ func TestGemma4Block(t *testing.T) {
 		}
 		
 		// Full block with PLE
-		// TurboGemma4Block(ctx, x, ple, k, v, cache, isEntryLayer, numHeads, headDim, useSWA, maxWindow, isReasoning, isAudio, includeTurbo)
-		out = TurboGemma4Block(ctx, x, ple, nil, nil, cache, true, numHeads, headDim, false, 8192.0, nil, nil, true)
+		// TurboGemma4Block(ctx, x, ple, k, v, cache, isEntryLayer, numHeads, headDim, useSWA, maxWindow, isReasoning, isAudio, isMedical, includeTurbo)
+		out = TurboGemma4Block(ctx, x, ple, nil, nil, cache, true, numHeads, headDim, false, 8192.0, nil, nil, nil, true)
 		return
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func TestSWA(t *testing.T) {
 			cache.InitializeVariables(ctx, batchSize, 8192, hiddenDim/2, dtypes.Uint8)
 		}
 		// Use SWA with 4096 window
-		out = TurboGemma4Attention(ctx, q, k, v, cache, true, numHeads, headDim, true, 8192.0, nil, nil, true)
+		out = TurboGemma4Attention(ctx, q, k, v, cache, true, numHeads, headDim, true, 8192.0, nil, nil, nil, true)
 		return
 	})
 	if err != nil {
@@ -213,13 +213,13 @@ func TestReasoningMode(t *testing.T) {
 		isFalse := Const(g, false)
 
 		// Test standard mode
-		packedStd := TurboQuantizeAdaptive(x, y, isFalse, isFalse)
-		x_std, y_std := TurboDequantizeAdaptive(packedStd, isFalse, isFalse)
+		packedStd := TurboQuantizeAdaptive(x, y, isFalse, isFalse, nil)
+		x_std, y_std := TurboDequantizeAdaptive(packedStd, isFalse, isFalse, nil)
 		std = Concatenate([]*Node{x_std, y_std}, 2)
 
 		// Test reasoning mode (2-bit QJL)
-		packedReasoning := TurboQuantizeAdaptive(x, y, isTrue, isFalse)
-		x_reas, y_reas := TurboDequantizeAdaptive(packedReasoning, isTrue, isFalse)
+		packedReasoning := TurboQuantizeAdaptive(x, y, isTrue, isFalse, nil)
+		x_reas, y_reas := TurboDequantizeAdaptive(packedReasoning, isTrue, isFalse, nil)
 		reasoning = Concatenate([]*Node{x_reas, y_reas}, 2)
 		return
 	})

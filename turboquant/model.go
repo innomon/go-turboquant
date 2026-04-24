@@ -22,8 +22,10 @@ type Gemma4Config struct {
 	NumMTPHeads  int     `yaml:"num_mtp_heads"`
 	IncludeMTP   bool    `yaml:"include_mtp"`
 	IncludeTurbo bool    `yaml:"include_turbo"`
+	IsMedical    bool    `yaml:"is_medical"`
 	ThinkTokenID int     `yaml:"think_token_id"`
 	AudioTokenID int     `yaml:"audio_token_id"`
+	ImageTokenID int     `yaml:"image_token_id"`
 }
 
 // DefaultGemma4E4BConfig returns a default configuration for Gemma 4 E4B.
@@ -43,6 +45,7 @@ func DefaultGemma4E4BConfig() Gemma4Config {
 		IncludeTurbo: true,
 		ThinkTokenID: 5001, // <|think|>
 		AudioTokenID: 5004, // <|audio|>
+		ImageTokenID: 5005, // <|image|>
 	}
 }
 
@@ -56,11 +59,12 @@ func DefaultGemma3Config() Gemma4Config {
 		HeadDim:      128,
 		HiddenDim:    2048,
 		IncludeTurbo: true,
+		ImageTokenID: 5005,
 	}
 }
 
 // BuildGemma3Model builds the full Gemma 3 model graph.
-func BuildGemma3Model(ctx *context.Context, tokens *Node, config Gemma4Config) []*Node {
+func BuildGemma3Model(ctx *context.Context, tokens, visualTokens *Node, config Gemma4Config) []*Node {
 	ctx = ctx.In("gemma3")
 	g := tokens.Graph()
 
@@ -69,7 +73,15 @@ func BuildGemma3Model(ctx *context.Context, tokens *Node, config Gemma4Config) [
 	embedWeight := embedVar.ValueGraph(g)
 	x := layers.Embedding(ctx.In("embedding"), tokens, dtypes.Float32, config.VocabSize, config.HiddenDim)
 
-	// 2. Transformer Blocks
+	// 2. Multimodal Interleaving
+	var isMedical *Node
+	if config.IsMedical {
+		isMedical = Const(g, true)
+	}
+
+	x = InterleaveTokens(ctx, x, visualTokens, tokens, config.ImageTokenID)
+
+	// 3. Transformer Blocks
 	var caches []*KVCache
 	maxSeqLen := 8192
 	packedDim := config.HiddenDim / 2
@@ -79,19 +91,22 @@ func BuildGemma3Model(ctx *context.Context, tokens *Node, config Gemma4Config) [
 	batchSize := tokens.Shape().Dimensions[0]
 
 	for i := 0; i < config.NumLayers; i++ {
-		cache := NewKVCache(fmt.Sprintf("kv_cache_%d", i))
-		cacheDType := dtypes.Uint8
-		if !config.IncludeTurbo {
-			cacheDType = dtypes.Float32
+		cacheName := fmt.Sprintf("kv_cache_%d", i)
+		cache := NewKVCache(cacheName)
+		if ctx.GetVariableByScopeAndName("/"+cacheName, "k_cache") == nil {
+			cacheDType := dtypes.Uint8
+			if !config.IncludeTurbo {
+				cacheDType = dtypes.Float32
+			}
+			cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim, cacheDType)
 		}
-		cache.InitializeVariables(ctx, batchSize, maxSeqLen, packedDim, cacheDType)
 		caches = append(caches, cache)
 	}
 
 	intermediateDim := config.HiddenDim * 4 // Generic intermediate dim
 	for i := 0; i < config.NumLayers; i++ {
 		layerCtx := ctx.In(fmt.Sprintf("layer_%d", i))
-		x = TurboGemmaBlock(layerCtx, x, caches[i], config.NumHeads, config.HeadDim, intermediateDim)
+		x = TurboGemmaBlock(layerCtx, x, caches[i], config.NumHeads, config.HeadDim, intermediateDim, nil, isMedical)
 	}
 
 	// 3. Final Norm
@@ -102,16 +117,31 @@ func BuildGemma3Model(ctx *context.Context, tokens *Node, config Gemma4Config) [
 	return []*Node{logits}
 }
 
+// InterleaveTokens merges text embeddings and visual tokens.
+// In this prototype, it prepends visual tokens if they are provided.
+func InterleaveTokens(ctx *context.Context, textEmbeddings, visualTokens, tokens *Node, imageTokenID int) *Node {
+	if visualTokens == nil {
+		return textEmbeddings
+	}
+	// For MedGemma 1.5 prototype, we assume visual tokens are prepended.
+	// A more complex implementation would use the imageTokenID to find the insertion point.
+	return Concatenate([]*Node{visualTokens, textEmbeddings}, 1)
+}
+
 // BuildGemma4Model builds the full Gemma 4 model graph.
 // It returns a slice of nodes containing the base logits and MTP heads.
 func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Config) []*Node {
 	ctx = ctx.In("gemma4")
 	g := tokens.Graph()
 
-	// 0. Adaptive State Detection (Reasoning / Audio)
+	// 0. Adaptive State Detection (Reasoning / Audio / Medical)
 	// Check if any token in the current sequence triggers high-precision mode.
 	isReasoning := LogicalAny(Equal(tokens, Scalar(g, tokens.DType(), config.ThinkTokenID)))
 	isAudio := LogicalAny(Equal(tokens, Scalar(g, tokens.DType(), config.AudioTokenID)))
+	var isMedical *Node
+	if config.IsMedical {
+		isMedical = Const(g, true)
+	}
 	
 	// 1. Embedding
 	// embedWeight shape: [VocabSize, HiddenDim]
@@ -150,7 +180,7 @@ func BuildGemma4Model(ctx *context.Context, tokens, ple *Node, config Gemma4Conf
 		
 		// K and V projections are only needed at the entry layer of a shared group.
 		// These will be calculated inside the block if isEntryLayer is true.
-		x = TurboGemma4Block(layerCtx, x, ple, nil, nil, caches[i], isEntryLayer, config.NumHeads, config.HeadDim, config.UseSWA, config.MaxWindow, isReasoning, isAudio, config.IncludeTurbo)
+		x = TurboGemma4Block(layerCtx, x, ple, nil, nil, caches[i], isEntryLayer, config.NumHeads, config.HeadDim, config.UseSWA, config.MaxWindow, isReasoning, isAudio, isMedical, config.IncludeTurbo)
 	}
 
 	// 3. Final Norm

@@ -1,8 +1,13 @@
 package api
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,8 +52,18 @@ type ChatCompletionRequest struct {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content any         `json:"content"` // string or []ContentPart
+}
+
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+type ImageURL struct {
+	URL string `json:"url"`
 }
 
 // ChatCompletionResponse follows the OpenAI chat completions response schema.
@@ -101,20 +116,47 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Tokenize input
-	inputContent := req.Messages[len(req.Messages)-1].Content
+	// 1. Process input (Multimodal)
+	msg := req.Messages[len(req.Messages)-1]
+	var inputContent string
+	var imageBase64 string
+
+	switch c := msg.Content.(type) {
+	case string:
+		inputContent = c
+	case []any:
+		for _, part := range c {
+			pMap, ok := part.(map[string]any)
+			if !ok {
+				continue
+			}
+			if pMap["type"] == "text" {
+				inputContent, _ = pMap["text"].(string)
+			} else if pMap["type"] == "image_url" {
+				urlMap, _ := pMap["image_url"].(map[string]any)
+				imageBase64, _ = urlMap["url"].(string)
+				// Strip data:image/xxx;base64, prefix
+				if idx := strings.Index(imageBase64, "base64,"); idx != -1 {
+					imageBase64 = imageBase64[idx+7:]
+				}
+			}
+		}
+	}
+
 	inputTokens := s.tokenize(inputContent)
 
 	// 2. Initialize Execution if needed
 	if s.exec == nil {
 		var err error
-		s.exec, err = context.NewExec(s.Backend, s.Context, func(ctx *context.Context, tokens *Node) []*Node {
+		s.exec, err = context.NewExec(s.Backend, s.Context, func(ctx *context.Context, tokens, images *Node) []*Node {
+			var visualTokens *Node
 			if s.Config.ModelType == "gemma3" {
-				return turboquant.BuildGemma3Model(ctx, tokens, s.Config)
+				// For MedGemma 1.5 (Gemma 3 based), we include the vision encoder
+				visualTokens = turboquant.BuildMedGemmaVisionEncoder(ctx, images, turboquant.DefaultMedGemmaSigLIPConfig())
+				return turboquant.BuildGemma3Model(ctx, tokens, visualTokens, s.Config)
 			}
-			// Default to Gemma 4
+			// Default to Gemma 4 (Text-only for now in this branch)
 			g := tokens.Graph()
-			// Create a zero PLE tensor for initial call
 			pleShape := shapes.Make(dtypes.Float32, 1, tokens.Shape().Dimensions[1], s.Config.PLEDim)
 			ple := Const(g, tensors.FromScalarAndDimensions(float32(0), pleShape.Dimensions...))
 			return turboquant.BuildGemma4Model(ctx, tokens, ple, s.Config)
@@ -125,16 +167,22 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Inference Loop (with MTP)
+	// 3. Prepare Tensors
+	currentTokens := tensors.FromFlatDataAndDimensions(inputTokens, 1, len(inputTokens))
+	var imageTensor *tensors.Tensor
+	if imageBase64 != "" {
+		imageTensor = s.decodeImage(imageBase64)
+	} else {
+		// Zero tensor if no image
+		imageTensor = tensors.FromScalarAndDimensions(float32(0), 1, 896, 896, 3)
+	}
+
+	// 4. Inference Loop
 	var generatedTokens []int32
 	maxNewTokens := 50
 	
-	// Prepare initial tensor
-	currentTokens := tensors.FromFlatDataAndDimensions(inputTokens, 1, len(inputTokens))
-	
 	for len(generatedTokens) < maxNewTokens {
-		// Run inference
-		results, err := s.exec.Exec(currentTokens)
+		results, err := s.exec.Exec(currentTokens, imageTensor)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("inference error: %v", err), http.StatusInternalServerError)
 			return
@@ -235,6 +283,8 @@ func (s *Server) Start() error {
 		if err := s.LoadWeights(); err != nil {
 			return fmt.Errorf("failed to load weights: %w", err)
 		}
+		// Also try to load SigLIP weights from a 'siglip' subfolder
+		_ = s.LoadSigLIPWeights(filepath.Join(s.WeightsDir, "siglip"))
 	}
 	
 	if s.MTPCheckpoint != "" {
@@ -252,6 +302,14 @@ func (s *Server) Start() error {
 	mux := s.InitializeServer()
 	fmt.Printf("🚀 TurboQuant API server listening on :%d\n", s.Port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", s.Port), mux)
+}
+
+func mapHuggingFaceToGoMLX(hfName string) string {
+	name := strings.ReplaceAll(hfName, ".", "/")
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	return name
 }
 
 // LoadWeights loads safetensors from the WeightsDir.
@@ -290,10 +348,84 @@ func (s *Server) LoadWeights() error {
 	return nil
 }
 
-func mapHuggingFaceToGoMLX(hfName string) string {
-	name := strings.ReplaceAll(hfName, ".", "/")
-	if !strings.HasPrefix(name, "/") {
-		name = "/" + name
+func (s *Server) decodeImage(base64Str string) *tensors.Tensor {
+	data, err := base64.StdEncoding.DecodeString(base64Str)
+	if err != nil {
+		fmt.Printf("⚠️ Failed to decode base64 image: %v\n", err)
+		return tensors.FromScalarAndDimensions(float32(0), 1, 896, 896, 3)
 	}
-	return name
+
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		fmt.Printf("⚠️ Failed to decode image: %v\n", err)
+		return tensors.FromScalarAndDimensions(float32(0), 1, 896, 896, 3)
+	}
+
+	// Simple resize/normalization (896x896)
+	// In a production environment, use golang.org/x/image/draw for high-quality resizing.
+	res := make([]float32, 1*896*896*3)
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+
+	for y := 0; y < 896; y++ {
+		for x := 0; x < 896; x++ {
+			// Nearest neighbor sampling for this prototype
+			srcX := x * w / 896
+			srcY := y * h / 896
+			r, g, b, _ := img.At(bounds.Min.X+srcX, bounds.Min.Y+srcY).RGBA()
+			// Normalize to [0, 1] or [-1, 1] as expected by SigLIP
+			idx := (y*896 + x) * 3
+			res[idx] = float32(r) / 65535.0
+			res[idx+1] = float32(g) / 65535.0
+			res[idx+2] = float32(b) / 65535.0
+		}
+	}
+
+	return tensors.FromFlatDataAndDimensions(res, 1, 896, 896, 3)
+}
+
+// LoadSigLIPWeights loads vision-specific weights if stored in a separate directory.
+func (s *Server) LoadSigLIPWeights(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	fmt.Printf("👁️ Loading SigLIP vision weights from %s...\n", dir)
+	// Logic similar to LoadWeights but targeted at siglip/ scope
+	return s.LoadWeightsFromDir(dir, "/siglip")
+}
+
+// LoadWeightsFromDir is a helper to load weights into a specific scope.
+func (s *Server) LoadWeightsFromDir(dir, scopePrefix string) error {
+	files, err := filepath.Glob(filepath.Join(dir, "*.safetensors"))
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		st, err := safetensors.Deserialize(data)
+		if err != nil {
+			return err
+		}
+		for _, name := range st.Names() {
+			t, _ := st.Tensor(name)
+			gomlxScope := scopePrefix + mapHuggingFaceToGoMLX(name)
+
+			dims := make([]int, len(t.Shape()))
+			for i, dim := range t.Shape() {
+				dims[i] = int(dim)
+			}
+
+			if t.DType() == safetensors.F32 {
+				tData := t.Data()
+				floatData := *(*[]float32)(unsafe.Pointer(&tData))
+				floatData = floatData[:len(tData)/4]
+				gmlxt := tensors.FromFlatDataAndDimensions(floatData, dims...)
+				s.Context.In(gomlxScope).VariableWithShape("weight", shapes.Make(gmlxt.DType(), dims...)).MustSetValue(gmlxt)
+			}
+		}
+	}
+	return nil
 }
