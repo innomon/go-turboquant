@@ -11,6 +11,9 @@ turboquant-api
 *.out
 coverage.txt
 
+# python 
+.venv/
+
 # Dependency directories
 vendor/
 
